@@ -1,0 +1,9 @@
+I want you to build a TUI app based on 
+
+retrofits_prd.md
+. Make a plan based on that prd. For each step, you should have a relavant testing suite. You may use example fits file 
+
+18109J000.fits
+ and its rendered image 
+
+18109J000_cntrst2.jpg
