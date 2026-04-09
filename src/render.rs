@@ -18,7 +18,7 @@ pub struct RenderRequest {
     pub black_point: f32,
     pub white_point: f32,
     pub zoom: f64,
-    pub offset: (i32, i32),
+    pub center: (f64, f64),
     pub term_size: (u16, u16),
 }
 
@@ -102,11 +102,19 @@ fn process_frame(
     let crop_w = ((term_phys_w / scale_factor).min(img_w) as usize).max(1);
     let crop_h = ((term_phys_h / scale_factor).min(img_h) as usize).max(1);
 
-    let max_x = fits.width.saturating_sub(crop_w) as i32;
-    let max_y = fits.height.saturating_sub(crop_h) as i32;
+    // We want the viewport centered on `req.center`.
+    let start_x = req.center.0 - (crop_w as f64 / 2.0);
+    let start_y = req.center.1 - (crop_h as f64 / 2.0);
+
+    let max_x = fits.width.saturating_sub(crop_w) as f64;
+    let max_y = fits.height.saturating_sub(crop_h) as f64;
     
-    let x = req.offset.0.clamp(0, max_x) as usize;
-    let y = req.offset.1.clamp(0, max_y) as usize;
+    // Clamp start coordinates safely inside image bounds
+    let start_x = start_x.clamp(0.0, max_x.max(0.0));
+    let start_y = start_y.clamp(0.0, max_y.max(0.0));
+
+    let x = start_x.round() as usize;
+    let y = start_y.round() as usize;
 
     let x_end = (x + crop_w).min(fits.width);
     let y_end = (y + crop_h).min(fits.height);

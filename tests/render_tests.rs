@@ -17,7 +17,7 @@ fn test_render_thread() {
     let fits_arc = Arc::new(fits_image);
     let picker = Picker::halfblocks();
 
-    let render_thread = RenderThread::new(fits_arc, picker);
+    let render_thread = RenderThread::new(fits_arc.clone(), picker);
 
     let req = RenderRequest {
         stretch: StretchFunction::Asinh,
@@ -25,7 +25,7 @@ fn test_render_thread() {
         black_point: 0.0,
         white_point: 100.0,
         zoom: 1.0,
-        offset: (0, 0),
+        center: (fits_arc.width as f64 / 2.0, fits_arc.height as f64 / 2.0),
         term_size: (80, 24),
     };
 

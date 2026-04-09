@@ -16,7 +16,7 @@ pub struct App {
     pub black_point: f32,
     pub white_point: f32,
     pub zoom: f64,
-    pub offset: (i32, i32),
+    pub center: (f64, f64),
     pub term_size: (u16, u16),
     pub protocol: StatefulProtocol,
     pub protocol_type: ProtocolType,
@@ -40,13 +40,13 @@ impl App {
         let render_thread = RenderThread::new(fits.clone(), picker.clone());
 
         Ok(Self {
+            center: (fits.width as f64 / 2.0, fits.height as f64 / 2.0),
             fits,
             stretch,
             colormap,
             black_point,
             white_point,
             zoom: 1.0,
-            offset: (0, 0),
             term_size: (80, 24),
             protocol,
             protocol_type,
@@ -62,7 +62,7 @@ impl App {
             black_point: self.black_point,
             white_point: self.white_point,
             zoom: self.zoom,
-            offset: self.offset,
+            center: self.center,
             term_size: self.term_size,
         };
         self.render_thread.request(req);
@@ -104,27 +104,27 @@ impl App {
             }
             KeyCode::Char('r') => {
                 self.zoom = 1.0;
-                self.offset = (0, 0);
+                self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
                 self.queue_render();
             }
             KeyCode::Left | KeyCode::Char('h') => {
-                let pan = (self.fits.width as f64 / self.zoom * 0.1) as i32;
-                self.offset.0 -= pan.max(1);
+                let pan = self.fits.width as f64 / self.zoom * 0.5;
+                self.center.0 -= pan.max(1.0);
                 self.queue_render();
             }
             KeyCode::Right | KeyCode::Char('l') => {
-                let pan = (self.fits.width as f64 / self.zoom * 0.1) as i32;
-                self.offset.0 += pan.max(1);
+                let pan = self.fits.width as f64 / self.zoom * 0.5;
+                self.center.0 += pan.max(1.0);
                 self.queue_render();
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                let pan = (self.fits.height as f64 / self.zoom * 0.1) as i32;
-                self.offset.1 -= pan.max(1);
+                let pan = self.fits.height as f64 / self.zoom * 0.5;
+                self.center.1 -= pan.max(1.0);
                 self.queue_render();
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let pan = (self.fits.height as f64 / self.zoom * 0.1) as i32;
-                self.offset.1 += pan.max(1);
+                let pan = self.fits.height as f64 / self.zoom * 0.5;
+                self.center.1 += pan.max(1.0);
                 self.queue_render();
             }
             _ => {}

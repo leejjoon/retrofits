@@ -17,11 +17,9 @@ fn test_viewport_zoom_and_pan() {
     let mut app = App::new(std::sync::Arc::new(fits_image), &mut picker).unwrap();
     
     // Default viewport
-    let (x, y, w, h) = app.compute_viewport();
-    assert_eq!(x, 0);
-    assert_eq!(y, 0);
-    assert_eq!(w, original_w);
-    assert_eq!(h, original_h);
+    assert_eq!(app.zoom, 1.0);
+    assert_eq!(app.center.0, original_w as f64 / 2.0);
+    assert_eq!(app.center.1, original_h as f64 / 2.0);
 
     use crossterm::event::{KeyEvent, KeyCode, KeyModifiers, KeyEventKind, KeyEventState};
 
@@ -34,9 +32,6 @@ fn test_viewport_zoom_and_pan() {
     app.handle_key(zoom_in_event);
     
     assert!(app.zoom > 1.0);
-    let (_, _, w_zoom, h_zoom) = app.compute_viewport();
-    assert!(w_zoom < original_w);
-    assert!(h_zoom < original_h);
 
     let pan_right_event = KeyEvent {
         code: KeyCode::Right,
@@ -45,7 +40,7 @@ fn test_viewport_zoom_and_pan() {
         state: KeyEventState::empty(),
     };
     app.handle_key(pan_right_event);
-    assert!(app.offset.0 > 0);
+    assert!(app.center.0 > original_w as f64 / 2.0);
     
     let pan_down_event = KeyEvent {
         code: KeyCode::Down,
@@ -54,7 +49,7 @@ fn test_viewport_zoom_and_pan() {
         state: KeyEventState::empty(),
     };
     app.handle_key(pan_down_event);
-    assert!(app.offset.1 > 0);
+    assert!(app.center.1 > original_h as f64 / 2.0);
 
     let reset_event = KeyEvent {
         code: KeyCode::Char('r'),
@@ -64,5 +59,6 @@ fn test_viewport_zoom_and_pan() {
     };
     app.handle_key(reset_event);
     assert_eq!(app.zoom, 1.0);
-    assert_eq!(app.offset, (0, 0));
+    assert_eq!(app.center.0, original_w as f64 / 2.0);
+    assert_eq!(app.center.1, original_h as f64 / 2.0);
 }

@@ -30,8 +30,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Status bar
     let status_text = format!(
-        " {}x{} | Zoom: {:.2}x | Offset: ({}, {}) | Stretch: {:?} | Colormap: {:?} | Protocol: {:?} | s: stretch, c: colormap, +/-: zoom, q: quit ",
-        app.fits.width, app.fits.height, app.zoom, app.offset.0, app.offset.1, app.stretch, app.colormap, app.protocol_type
+        " {}x{} | Zoom: {:.2}x | Center: ({:.0}, {:.0}) | Stretch: {:?} | Colormap: {:?} | Protocol: {:?} | s: stretch, c: colormap, +/-: zoom, q: quit ",
+        app.fits.width, app.fits.height, app.zoom, app.center.0, app.center.1, app.stretch, app.colormap, app.protocol_type
     );
 
     let status_bar = Paragraph::new(Span::raw(status_text))
