@@ -1,11 +1,11 @@
+use ratatui_image::picker::Picker;
+use retrofits::colormap::ColormapName;
+use retrofits::fits;
+use retrofits::render::{RenderRequest, RenderThread};
+use retrofits::stretch::StretchFunction;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use retrofits::fits;
-use retrofits::render::{RenderRequest, RenderThread};
-use retrofits::colormap::ColormapName;
-use retrofits::stretch::StretchFunction;
-use ratatui_image::picker::Picker;
 
 fn example_fits_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example_fits/18109J000.fits")
@@ -27,6 +27,7 @@ fn test_render_thread() {
         zoom: 1.0,
         center: (fits_arc.width as f64 / 2.0, fits_arc.height as f64 / 2.0),
         term_size: (80, 24),
+        protocol_type: ratatui_image::picker::ProtocolType::Halfblocks,
     };
 
     render_thread.request(req);

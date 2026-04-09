@@ -24,17 +24,20 @@ pub fn estimate_zscale(data: &Array2<f32>, contrast: f32) -> (f32, f32) {
     // Median
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     let mid = samples.len() / 2;
-    let median = if samples.len() % 2 == 0 {
+    let median = if samples.len().is_multiple_of(2) {
         (samples[mid - 1] + samples[mid]) / 2.0
     } else {
         samples[mid]
     };
     // Standard deviation
     let mean: f32 = samples.iter().copied().sum::<f32>() / samples.len() as f32;
-    let var: f32 = samples.iter().map(|v| {
-        let d = *v - mean;
-        d * d
-    }).sum::<f32>()
+    let var: f32 = samples
+        .iter()
+        .map(|v| {
+            let d = *v - mean;
+            d * d
+        })
+        .sum::<f32>()
         / samples.len() as f32;
     let sigma = var.sqrt();
     let vmin = median - contrast * sigma;

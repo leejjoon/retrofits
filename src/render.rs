@@ -20,6 +20,7 @@ pub struct RenderRequest {
     pub zoom: f64,
     pub center: (f64, f64),
     pub term_size: (u16, u16),
+    pub protocol_type: ratatui_image::picker::ProtocolType,
 }
 
 /// The response from the render thread containing the processed protocol state.
@@ -79,15 +80,14 @@ impl RenderThread {
     }
 }
 
-fn process_frame(
-    fits: &FitsImage,
-    picker: &mut Picker,
-    req: RenderRequest,
-) -> StatefulProtocol {
+fn process_frame(fits: &FitsImage, picker: &mut Picker, req: RenderRequest) -> StatefulProtocol {
+    // Update the picker's protocol type based on the request
+    picker.set_protocol_type(req.protocol_type);
+
     // 1. Compute viewport based on terminal layout
     let (img_w, img_h) = (fits.width as f64, fits.height as f64);
     let (font_w, font_h) = picker.font_size();
-    
+
     // Fallback if font size is 0
     let font_w = if font_w > 0 { font_w as f64 } else { 10.0 };
     let font_h = if font_h > 0 { font_h as f64 } else { 20.0 };
@@ -108,7 +108,7 @@ fn process_frame(
 
     let max_x = fits.width.saturating_sub(crop_w) as f64;
     let max_y = fits.height.saturating_sub(crop_h) as f64;
-    
+
     // Clamp start coordinates safely inside image bounds
     let start_x = start_x.clamp(0.0, max_x.max(0.0));
     let start_y = start_y.clamp(0.0, max_y.max(0.0));

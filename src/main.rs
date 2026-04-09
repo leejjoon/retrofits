@@ -41,9 +41,23 @@ fn main() -> Result<()> {
     // Query terminal for image protocol capabilities
     let mut picker = Picker::from_query_stdio()?;
 
+    // Store the guessed best protocol
+    let guessed_protocol = picker.protocol_type();
+
     // Check if the terminal is Ghostty
-    let is_ghostty = std::env::var("TERM_PROGRAM").map(|v| v.to_lowercase() == "ghostty").unwrap_or(false)
-        || std::env::var("TERM").map(|v| v.to_lowercase().contains("ghostty")).unwrap_or(false);
+    let is_ghostty = std::env::var("TERM_PROGRAM")
+        .map(|v| v.to_lowercase() == "ghostty")
+        .unwrap_or(false)
+        || std::env::var("TERM")
+            .map(|v| v.to_lowercase().contains("ghostty"))
+            .unwrap_or(false);
+
+    // Default to Halfblocks if no protocol is explicitly requested via CLI
+    let default_protocol = if is_ghostty {
+        ratatui_image::picker::ProtocolType::Kitty
+    } else {
+        ratatui_image::picker::ProtocolType::Halfblocks
+    };
 
     // Override protocol if specified
     if let Some(proto_str) = cli.protocol {
@@ -55,14 +69,23 @@ fn main() -> Result<()> {
             _ => ratatui_image::picker::ProtocolType::Halfblocks,
         };
         picker.set_protocol_type(p);
-    } else if is_ghostty && picker.protocol_type() == ratatui_image::picker::ProtocolType::Halfblocks {
-        // Ghostty supports Kitty protocol, but terminal querying sometimes fails or times out.
-        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+    } else {
+        picker.set_protocol_type(default_protocol);
     }
 
-
     // Create the App state
-    let mut app = App::new(std::sync::Arc::new(fits_image), &mut picker)?;
+    let filename = cli
+        .file
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let mut app = App::new(
+        std::sync::Arc::new(fits_image),
+        &mut picker,
+        filename,
+        guessed_protocol,
+    )?;
 
     // Main event loop
     let res = run_app(&mut terminal, &mut app);
@@ -79,10 +102,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     // Initial render request
     app.queue_render();
 
@@ -100,7 +120,7 @@ fn run_app(
         // 2. Poll for terminal events with a timeout
         // This acts as our event loop wait. A shorter timeout makes input feel snappier,
         // while a longer one saves CPU.
-        if event::poll(Duration::from_millis(5))? { 
+        if event::poll(Duration::from_millis(5))? {
             match event::read()? {
                 Event::Key(key) => {
                     app.handle_key(key);
