@@ -45,6 +45,8 @@ pub struct App {
     pub term_size: (u16, u16),
     pub cut_mode: CutMode,
     pub zscale_contrast: f32,
+    pub custom_black_point: f32,
+    pub custom_white_point: f32,
     pub input_mode: InputMode,
     pub input_buffer: String,
     pub protocol: StatefulProtocol,
@@ -79,6 +81,8 @@ impl App {
             term_size: (80, 24),
             cut_mode: CutMode::MinMax,
             zscale_contrast: 0.25,
+            custom_black_point: black_point,
+            custom_white_point: white_point,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             protocol,
@@ -107,7 +111,8 @@ impl App {
                 self.white_point = vmax;
             }
             CutMode::Custom => {
-                // Keep existing values
+                self.black_point = self.custom_black_point;
+                self.white_point = self.custom_white_point;
             }
         }
         self.queue_render();
@@ -214,14 +219,19 @@ impl App {
             KeyCode::Enter => {
                 if let Ok(val) = self.input_buffer.parse::<f32>() {
                     match self.input_mode {
-                        InputMode::EditingBlackPoint => self.black_point = val,
-                        InputMode::EditingWhitePoint => self.white_point = val,
+                        InputMode::EditingBlackPoint => {
+                            self.black_point = val;
+                            self.custom_black_point = val;
+                        }
+                        InputMode::EditingWhitePoint => {
+                            self.white_point = val;
+                            self.custom_white_point = val;
+                        }
                         _ => {}
                     }
-                    self.cut_mode = CutMode::Custom; // Switch to Custom on manual change
+                    self.cut_mode = CutMode::Custom; 
                     self.queue_render();
                 }
-                // Do not close the popup, just keep editing
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
@@ -230,12 +240,16 @@ impl App {
                 // Switch between fields, tentatively apply current input if valid
                 if let Ok(val) = self.input_buffer.parse::<f32>() {
                     match self.input_mode {
-                        InputMode::EditingBlackPoint => self.black_point = val,
-                        InputMode::EditingWhitePoint => self.white_point = val,
+                        InputMode::EditingBlackPoint => {
+                            self.black_point = val;
+                            self.custom_black_point = val;
+                        }
+                        InputMode::EditingWhitePoint => {
+                            self.white_point = val;
+                            self.custom_white_point = val;
+                        }
                         _ => {}
                     }
-                    // We don't necessarily switch mode to Custom just on Tab unless applied? 
-                    // But usually Tab implies focusing another, so let's keep it simple.
                 }
                 if self.input_mode == InputMode::EditingBlackPoint {
                     self.input_mode = InputMode::EditingWhitePoint;
