@@ -2,12 +2,20 @@ use crate::colormap::{apply_colormap, ColormapName};
 use crate::fits::FitsImage;
 use crate::stretch::{auto_stretch_params, compute_stretch, StretchFunction};
 use crate::render::{RenderRequest, RenderThread};
+use crate::zscale::estimate_zscale;
 
 use std::sync::Arc;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, KeyCode};
 use image::DynamicImage;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    EditingBlackPoint,
+    EditingWhitePoint,
+}
 
 pub struct App {
     pub fits: Arc<FitsImage>,
@@ -18,6 +26,10 @@ pub struct App {
     pub zoom: f64,
     pub center: (f64, f64),
     pub term_size: (u16, u16),
+    pub auto_zscale: bool,
+    pub zscale_contrast: f32,
+    pub input_mode: InputMode,
+    pub input_buffer: String,
     pub protocol: StatefulProtocol,
     pub protocol_type: ProtocolType,
     pub render_thread: RenderThread,
@@ -39,20 +51,39 @@ impl App {
         
         let render_thread = RenderThread::new(fits.clone(), picker.clone());
 
-        Ok(Self {
-            center: (fits.width as f64 / 2.0, fits.height as f64 / 2.0),
+        let mut app = Self {
             fits,
             stretch,
             colormap,
             black_point,
             white_point,
             zoom: 1.0,
+            center: (0.0, 0.0), // placeholder, will be set below
             term_size: (80, 24),
+            auto_zscale: true,
+            zscale_contrast: 0.25,
+            input_mode: InputMode::Normal,
+            input_buffer: String::new(),
             protocol,
             protocol_type,
             render_thread,
             running: true,
-        })
+        };
+        
+        app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
+        
+        if app.auto_zscale {
+            app.apply_zscale();
+        }
+
+        Ok(app)
+    }
+
+    pub fn apply_zscale(&mut self) {
+        let (vmin, vmax) = estimate_zscale(&self.fits.data, self.zscale_contrast);
+        self.black_point = vmin;
+        self.white_point = vmax;
+        self.queue_render();
     }
 
     pub fn queue_render(&mut self) {
@@ -75,8 +106,13 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
-        use crossterm::event::KeyCode;
-        
+        match self.input_mode {
+            InputMode::Normal => self.handle_normal_key(key),
+            InputMode::EditingBlackPoint | InputMode::EditingWhitePoint => self.handle_input_key(key),
+        }
+    }
+
+    fn handle_normal_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.running = false;
@@ -92,6 +128,16 @@ impl App {
             KeyCode::Char('c') => {
                 self.colormap = self.colormap.cycle();
                 self.queue_render();
+            }
+            KeyCode::Char('z') => {
+                self.auto_zscale = !self.auto_zscale;
+                if self.auto_zscale {
+                    self.apply_zscale();
+                }
+            }
+            KeyCode::Char('m') => {
+                self.input_mode = InputMode::EditingBlackPoint;
+                self.input_buffer = self.black_point.to_string();
             }
             KeyCode::Char('+') | KeyCode::Char('i') => {
                 self.zoom *= 1.5;
@@ -126,6 +172,59 @@ impl App {
                 let pan = self.fits.height as f64 / self.zoom * 0.5;
                 self.center.1 += pan.max(1.0);
                 self.queue_render();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_input_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                if let Ok(val) = self.input_buffer.parse::<f32>() {
+                    match self.input_mode {
+                        InputMode::EditingBlackPoint => self.black_point = val,
+                        InputMode::EditingWhitePoint => self.white_point = val,
+                        _ => {}
+                    }
+                }
+                
+                if self.input_mode == InputMode::EditingBlackPoint {
+                    self.input_mode = InputMode::EditingWhitePoint;
+                    self.input_buffer = self.white_point.to_string();
+                } else {
+                    self.input_mode = InputMode::Normal;
+                    self.auto_zscale = false; // Disable auto zscale when manually setting
+                    self.queue_render();
+                }
+            }
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
+                // Switch between fields
+                if let Ok(val) = self.input_buffer.parse::<f32>() {
+                    match self.input_mode {
+                        InputMode::EditingBlackPoint => self.black_point = val,
+                        InputMode::EditingWhitePoint => self.white_point = val,
+                        _ => {}
+                    }
+                }
+                if self.input_mode == InputMode::EditingBlackPoint {
+                    self.input_mode = InputMode::EditingWhitePoint;
+                    self.input_buffer = self.white_point.to_string();
+                } else {
+                    self.input_mode = InputMode::EditingBlackPoint;
+                    self.input_buffer = self.black_point.to_string();
+                }
+            }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                // Allow numbers, dots, and minus sign
+                if c.is_digit(10) || c == '.' || c == '-' {
+                    self.input_buffer.push(c);
+                }
             }
             _ => {}
         }
