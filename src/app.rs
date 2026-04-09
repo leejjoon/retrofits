@@ -99,9 +99,12 @@ impl App {
         self.render_thread.request(req);
     }
     
-    pub fn try_update_protocol(&mut self) {
+    pub fn try_update_protocol(&mut self) -> bool {
         if let Some(new_protocol) = self.render_thread.try_recv() {
             self.protocol = new_protocol;
+            true
+        } else {
+            false
         }
     }
 

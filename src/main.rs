@@ -86,14 +86,40 @@ fn run_app(
     // Initial render request
     app.queue_render();
 
-    while app.running {
-        app.try_update_protocol();
-        terminal.draw(|f| ui::draw(f, app))?;
+    // Initial draw
+    terminal.draw(|f| ui::draw(f, app))?;
 
-        if event::poll(Duration::from_millis(16))? { // Roughly 60fps responsiveness
-            if let Event::Key(key) = event::read()? {
-                app.handle_key(key);
+    while app.running {
+        let mut should_draw = false;
+
+        // 1. Check for incoming render thread frames
+        if app.try_update_protocol() {
+            should_draw = true;
+        }
+
+        // 2. Poll for terminal events with a timeout
+        // This acts as our event loop wait. A shorter timeout makes input feel snappier,
+        // while a longer one saves CPU.
+        if event::poll(Duration::from_millis(5))? { 
+            match event::read()? {
+                Event::Key(key) => {
+                    app.handle_key(key);
+                    should_draw = true;
+                }
+                Event::Resize(_w, _h) => {
+                    // Force a redraw on resize
+                    should_draw = true;
+                }
+                _ => {}
             }
+        }
+
+        // 3. Redraw only if something changed
+        if should_draw {
+            terminal.draw(|f| ui::draw(f, app))?;
+        } else {
+            // Optional: Small sleep to avoid spinning if poll() returns immediately
+            // but for now 5ms duration on poll is our rate limiter.
         }
     }
     Ok(())
