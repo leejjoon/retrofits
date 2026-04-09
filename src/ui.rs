@@ -43,7 +43,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Handle Manual Cut Popup
     if app.input_mode != InputMode::Normal {
-        let area = centered_rect(40, 30, f.area());
+        // Redesigned popup with horizontal packing to save vertical space
+        let area = centered_rect(60, 25, f.area());
         f.render_widget(Clear, area);
         
         let block = Block::default()
@@ -51,19 +52,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow));
         
-        let _inner_area = block.inner(area);
         f.render_widget(block, area);
 
-        let layout = Layout::default()
+        let inner_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Min(0),
+                Constraint::Min(0),        // Top padding/title space
+                Constraint::Length(3),     // Horizontal entries
+                Constraint::Length(1),     // Help text
             ])
             .margin(1)
             .split(area);
+
+        let entry_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ])
+            .split(inner_layout[1]);
 
         let black_style = if app.input_mode == InputMode::EditingBlackPoint {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
@@ -80,13 +87,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let black_text = if app.input_mode == InputMode::EditingBlackPoint {
             &app.input_buffer
         } else {
-            &format!("{:.2}", app.black_point)
+            &format!("{:.6}", app.black_point) // Precision increased for small values
         };
 
         let white_text = if app.input_mode == InputMode::EditingWhitePoint {
             &app.input_buffer
         } else {
-            &format!("{:.2}", app.white_point)
+            &format!("{:.6}", app.white_point)
         };
 
         let black_input = Paragraph::new(black_text.as_str())
@@ -95,12 +102,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let white_input = Paragraph::new(white_text.as_str())
             .block(Block::default().title(" White Point (High Cut) ").borders(Borders::ALL).border_style(white_style));
 
-        f.render_widget(black_input, layout[1]);
-        f.render_widget(white_input, layout[2]);
+        f.render_widget(black_input, entry_chunks[0]);
+        f.render_widget(white_input, entry_chunks[1]);
         
         let help_text = Paragraph::new(" [Enter] Apply & Next  [Tab] Switch Field  [Esc] Cancel ")
             .style(Style::default().fg(Color::DarkGray));
-        f.render_widget(help_text, layout[3]);
+        f.render_widget(help_text, inner_layout[2]);
     }
 }
 
