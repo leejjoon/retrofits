@@ -10,6 +10,23 @@ use image::DynamicImage;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CutMode {
+    MinMax,
+    ZScale,
+    Custom,
+}
+
+impl std::fmt::Display for CutMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MinMax => write!(f, "MinMax"),
+            Self::ZScale => write!(f, "Z-Scale"),
+            Self::Custom => write!(f, "Custom"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
@@ -26,7 +43,7 @@ pub struct App {
     pub zoom: f64,
     pub center: (f64, f64),
     pub term_size: (u16, u16),
-    pub auto_zscale: bool,
+    pub cut_mode: CutMode,
     pub zscale_contrast: f32,
     pub input_mode: InputMode,
     pub input_buffer: String,
@@ -58,9 +75,9 @@ impl App {
             black_point,
             white_point,
             zoom: 1.0,
-            center: (0.0, 0.0), // placeholder, will be set below
+            center: (0.0, 0.0), // placeholder
             term_size: (80, 24),
-            auto_zscale: true,
+            cut_mode: CutMode::MinMax,
             zscale_contrast: 0.25,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
@@ -72,17 +89,27 @@ impl App {
         
         app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
         
-        if app.auto_zscale {
-            app.apply_zscale();
-        }
+        // Initial apply of default cut mode (MinMax)
+        app.apply_cut_mode();
 
         Ok(app)
     }
 
-    pub fn apply_zscale(&mut self) {
-        let (vmin, vmax) = estimate_zscale(&self.fits.data, self.zscale_contrast);
-        self.black_point = vmin;
-        self.white_point = vmax;
+    pub fn apply_cut_mode(&mut self) {
+        match self.cut_mode {
+            CutMode::MinMax => {
+                self.black_point = self.fits.min_value();
+                self.white_point = self.fits.max_value();
+            }
+            CutMode::ZScale => {
+                let (vmin, vmax) = estimate_zscale(&self.fits.data, self.zscale_contrast);
+                self.black_point = vmin;
+                self.white_point = vmax;
+            }
+            CutMode::Custom => {
+                // Keep existing values
+            }
+        }
         self.queue_render();
     }
 
@@ -133,10 +160,12 @@ impl App {
                 self.queue_render();
             }
             KeyCode::Char('z') => {
-                self.auto_zscale = !self.auto_zscale;
-                if self.auto_zscale {
-                    self.apply_zscale();
-                }
+                self.cut_mode = match self.cut_mode {
+                    CutMode::MinMax => CutMode::ZScale,
+                    CutMode::ZScale => CutMode::Custom,
+                    CutMode::Custom => CutMode::MinMax,
+                };
+                self.apply_cut_mode();
             }
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::EditingBlackPoint;
@@ -189,28 +218,24 @@ impl App {
                         InputMode::EditingWhitePoint => self.white_point = val,
                         _ => {}
                     }
-                }
-                
-                if self.input_mode == InputMode::EditingBlackPoint {
-                    self.input_mode = InputMode::EditingWhitePoint;
-                    self.input_buffer = self.white_point.to_string();
-                } else {
-                    self.input_mode = InputMode::Normal;
-                    self.auto_zscale = false; // Disable auto zscale when manually setting
+                    self.cut_mode = CutMode::Custom; // Switch to Custom on manual change
                     self.queue_render();
                 }
+                // Do not close the popup, just keep editing
             }
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
             }
             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
-                // Switch between fields
+                // Switch between fields, tentatively apply current input if valid
                 if let Ok(val) = self.input_buffer.parse::<f32>() {
                     match self.input_mode {
                         InputMode::EditingBlackPoint => self.black_point = val,
                         InputMode::EditingWhitePoint => self.white_point = val,
                         _ => {}
                     }
+                    // We don't necessarily switch mode to Custom just on Tab unless applied? 
+                    // But usually Tab implies focusing another, so let's keep it simple.
                 }
                 if self.input_mode == InputMode::EditingBlackPoint {
                     self.input_mode = InputMode::EditingWhitePoint;
@@ -224,7 +249,6 @@ impl App {
                 self.input_buffer.pop();
             }
             KeyCode::Char(c) => {
-                // Allow numbers, dots, and minus sign
                 if c.is_digit(10) || c == '.' || c == '-' {
                     self.input_buffer.push(c);
                 }

@@ -29,10 +29,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_stateful_widget(image_widget, chunks[0], &mut app.protocol);
 
     // Status bar
-    let mode_str = if app.auto_zscale { "Auto (Z-Scale)" } else { "Manual" };
     let status_text = format!(
-        " {}x{} | Zoom: {:.2}x | Center: ({:.0}, {:.0}) | Mode: {} | Cuts: [{:.2}, {:.2}] | s: stretch, c: colormap, z: auto, m: manual cut, q: quit ",
-        app.fits.width, app.fits.height, app.zoom, app.center.0, app.center.1, mode_str, app.black_point, app.white_point
+        " {}x{} | Zoom: {:.2}x | Center: ({:.1}, {:.1}) | Mode: {} | Cuts: [{:.4}, {:.4}] | s: stretch, c: colormap, z: cycle cut, m: manual popup, q: quit ",
+        app.fits.width, app.fits.height, app.zoom, app.center.0, app.center.1, app.cut_mode, app.black_point, app.white_point
     );
 
     let status_bar = Paragraph::new(Span::raw(status_text))
@@ -43,7 +42,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Handle Manual Cut Popup
     if app.input_mode != InputMode::Normal {
-        // Redesigned popup with horizontal packing to save vertical space
         let area = centered_rect(60, 25, f.area());
         f.render_widget(Clear, area);
         
@@ -57,9 +55,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let inner_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(0),        // Top padding/title space
-                Constraint::Length(3),     // Horizontal entries
-                Constraint::Length(1),     // Help text
+                Constraint::Min(0),
+                Constraint::Length(3),
+                Constraint::Length(1),
             ])
             .margin(1)
             .split(area);
@@ -87,7 +85,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let black_text = if app.input_mode == InputMode::EditingBlackPoint {
             &app.input_buffer
         } else {
-            &format!("{:.6}", app.black_point) // Precision increased for small values
+            &format!("{:.6}", app.black_point)
         };
 
         let white_text = if app.input_mode == InputMode::EditingWhitePoint {
@@ -105,7 +103,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(black_input, entry_chunks[0]);
         f.render_widget(white_input, entry_chunks[1]);
         
-        let help_text = Paragraph::new(" [Enter] Apply & Next  [Tab] Switch Field  [Esc] Cancel ")
+        let help_text = Paragraph::new(" [Enter] Apply  [Tab/Arrows] Switch  [Esc/q] Close ")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(help_text, inner_layout[2]);
     }
