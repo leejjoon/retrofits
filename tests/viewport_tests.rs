@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use ratatui_image::picker::Picker;
 use retrofits::app::App;
 use retrofits::fits;
-use ratatui_image::picker::Picker;
+use std::path::PathBuf;
 
 fn example_fits_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example_fits/18109J000.fits")
@@ -12,16 +12,23 @@ fn test_viewport_zoom_and_pan() {
     let fits_image = fits::load_fits(&example_fits_path()).unwrap();
     let original_w = fits_image.width;
     let original_h = fits_image.height;
-    
+
     let mut picker = Picker::halfblocks();
-    let mut app = App::new(std::sync::Arc::new(fits_image), &mut picker).unwrap();
-    
+    let guessed = ratatui_image::picker::ProtocolType::Halfblocks;
+    let mut app = App::new(
+        std::sync::Arc::new(fits_image),
+        &mut picker,
+        "test.fits".to_string(),
+        guessed,
+    )
+    .unwrap();
+
     // Default viewport
     assert_eq!(app.zoom, 1.0);
     assert_eq!(app.center.0, original_w as f64 / 2.0);
     assert_eq!(app.center.1, original_h as f64 / 2.0);
 
-    use crossterm::event::{KeyEvent, KeyCode, KeyModifiers, KeyEventKind, KeyEventState};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     let zoom_in_event = KeyEvent {
         code: KeyCode::Char('+'),
@@ -30,7 +37,7 @@ fn test_viewport_zoom_and_pan() {
         state: KeyEventState::empty(),
     };
     app.handle_key(zoom_in_event);
-    
+
     assert!(app.zoom > 1.0);
 
     let pan_right_event = KeyEvent {
@@ -41,7 +48,7 @@ fn test_viewport_zoom_and_pan() {
     };
     app.handle_key(pan_right_event);
     assert!(app.center.0 > original_w as f64 / 2.0);
-    
+
     let pan_down_event = KeyEvent {
         code: KeyCode::Down,
         modifiers: KeyModifiers::empty(),

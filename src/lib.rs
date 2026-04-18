@@ -1,7 +1,7 @@
-pub mod fits;
-pub mod stretch;
-pub mod colormap;
 pub mod app;
-pub mod ui;
+pub mod colormap;
+pub mod fits;
 pub mod render;
+pub mod stretch;
+pub mod ui;
 pub mod zscale;

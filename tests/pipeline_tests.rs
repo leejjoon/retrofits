@@ -14,15 +14,13 @@ fn test_stretch_auto_minmax() {
 fn test_full_pipeline() {
     // A small 4x4 image
     let data = vec![
-        0.0f32, 10.0, 20.0, 30.0,
-        40.0,   50.0, 60.0, 70.0,
-        80.0,   90.0, 100.0, 110.0,
-        120.0, 130.0, 140.0, 150.0,
+        0.0f32, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0,
+        140.0, 150.0,
     ];
     let input = ndarray::Array2::from_shape_vec((4, 4), data).unwrap();
 
     let (black, white) = auto_stretch_params(input.view());
-    
+
     // Stretch
     let stretched = compute_stretch(input.view(), StretchFunction::Asinh, black, white);
     assert_eq!(stretched.shape(), &[4, 4]);

@@ -3,14 +3,14 @@
 //! Provides [`FitsImage`] which holds the parsed header metadata and the
 //! raw pixel data as a 2D `f32` array.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use ndarray::Array2;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
-use fitsrs::{Fits, HDU, Pixels};
+use fitsrs::{Fits, Pixels, HDU};
 
 /// Parsed FITS image containing header metadata and pixel data.
 #[derive(Debug)]
@@ -33,10 +33,7 @@ impl FitsImage {
 
     /// Maximum pixel value in the data array.
     pub fn max_value(&self) -> f32 {
-        self.data
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max)
+        self.data.iter().copied().fold(f32::NEG_INFINITY, f32::max)
     }
 }
 
@@ -87,7 +84,7 @@ pub fn load_fits(path: &Path) -> Result<FitsImage> {
             // Extract additional header cards
             for card in primary.get_header().cards() {
                 match card {
-                    fitsrs::card::Card::Value { name, value } 
+                    fitsrs::card::Card::Value { name, value }
                     | fitsrs::card::Card::Hierarch { name, value } => {
                         let val_str = match value {
                             fitsrs::card::Value::Integer { value: v, .. } => v.to_string(),
@@ -181,8 +178,6 @@ pub fn load_fits(path: &Path) -> Result<FitsImage> {
         _ => bail!("Primary HDU is not an image extension"),
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

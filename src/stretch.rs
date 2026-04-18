@@ -2,7 +2,6 @@
 
 use ndarray::{Array2, ArrayView2};
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum StretchFunction {
     Linear,
@@ -34,7 +33,7 @@ pub fn compute_stretch(
         .par_for_each(|out, &val| {
             // Normalize to 0..1 range first
             let mut normalized = (val - black_point) / range;
-            
+
             // Clamp strictly before complex math
             if normalized < 0.0 {
                 normalized = 0.0;
@@ -65,21 +64,25 @@ pub fn compute_stretch(
 pub fn auto_stretch_params(data: ArrayView2<f32>) -> (f32, f32) {
     let mut min = f32::INFINITY;
     let mut max = f32::NEG_INFINITY;
-    
+
     // Quick min/max pass (for a real app, you might want to compute
     // actual percentiles via a histogram for better auto-stretch).
     for &val in data.iter() {
         if val.is_finite() {
-            if val < min { min = val; }
-            if val > max { max = val; }
+            if val < min {
+                min = val;
+            }
+            if val > max {
+                max = val;
+            }
         }
     }
-    
+
     // Simple heuristic: set black point to min, white point to 99% of max if min=0
     let range = max - min;
     let black = min;
     let white = min + range * 0.99; // Clip top 1% blindly
-    
+
     (black, white)
 }
 
@@ -91,7 +94,7 @@ mod tests {
     fn test_linear_stretch() {
         let input = ndarray::arr2(&[[0.0, 50.0], [100.0, 150.0]]);
         let out = compute_stretch(input.view(), StretchFunction::Linear, 0.0, 100.0);
-        
+
         assert_eq!(out[[0, 0]], 0.0);
         assert_eq!(out[[0, 1]], 0.5);
         assert_eq!(out[[1, 0]], 1.0);
@@ -102,7 +105,7 @@ mod tests {
     fn test_log_stretch() {
         let input = ndarray::arr2(&[[0.0, 10.0], [50.0, 100.0]]);
         let out = compute_stretch(input.view(), StretchFunction::Logarithmic, 0.0, 100.0);
-        
+
         assert_eq!(out[[0, 0]], 0.0);
         assert_eq!(out[[1, 1]], 1.0);
         // Log curve should raise 10% (0.1) significantly higher than 0.1
@@ -113,7 +116,7 @@ mod tests {
     fn test_asinh_stretch() {
         let input = ndarray::arr2(&[[0.0, 10.0], [50.0, 100.0]]);
         let out = compute_stretch(input.view(), StretchFunction::Asinh, 0.0, 100.0);
-        
+
         assert_eq!(out[[0, 0]], 0.0);
         assert_eq!(out[[1, 1]], 1.0);
         // Asinh should also compress highlights

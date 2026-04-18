@@ -1,14 +1,14 @@
 use crate::colormap::{apply_colormap, ColormapName};
 use crate::fits::FitsImage;
-use crate::stretch::{auto_stretch_params, compute_stretch, StretchFunction};
 use crate::render::{RenderRequest, RenderThread};
+use crate::stretch::{auto_stretch_params, compute_stretch, StretchFunction};
 use crate::zscale::estimate_zscale;
 
-use std::sync::Arc;
-use crossterm::event::{KeyEvent, KeyCode};
+use crossterm::event::{KeyCode, KeyEvent};
 use image::DynamicImage;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum CutMode {
@@ -32,10 +32,13 @@ pub enum InputMode {
     Normal,
     EditingBlackPoint,
     EditingWhitePoint,
+    Summary,
+    Help { scroll: u16 },
 }
 
 pub struct App {
     pub fits: Arc<FitsImage>,
+    pub filename: String,
     pub stretch: StretchFunction,
     pub colormap: ColormapName,
     pub black_point: f32,
@@ -51,27 +54,34 @@ pub struct App {
     pub input_buffer: String,
     pub protocol: StatefulProtocol,
     pub protocol_type: ProtocolType,
+    pub guessed_protocol: ProtocolType,
     pub render_thread: RenderThread,
     pub running: bool,
 }
 
 impl App {
-    pub fn new(fits: Arc<FitsImage>, picker: &mut Picker) -> anyhow::Result<Self> {
+    pub fn new(
+        fits: Arc<FitsImage>,
+        picker: &mut Picker,
+        filename: String,
+        guessed_protocol: ProtocolType,
+    ) -> anyhow::Result<Self> {
         let (black_point, white_point) = auto_stretch_params(fits.data.view());
         let stretch = StretchFunction::Asinh;
         let colormap = ColormapName::Grayscale;
 
         let stretched = compute_stretch(fits.data.view(), stretch, black_point, white_point);
         let rgba = apply_colormap(stretched.view(), colormap);
-        
+
         let dyn_img = DynamicImage::ImageRgba8(rgba);
         let protocol = picker.new_resize_protocol(dyn_img);
         let protocol_type = picker.protocol_type();
-        
+
         let render_thread = RenderThread::new(fits.clone(), picker.clone());
 
         let mut app = Self {
             fits,
+            filename,
             stretch,
             colormap,
             black_point,
@@ -87,12 +97,13 @@ impl App {
             input_buffer: String::new(),
             protocol,
             protocol_type,
+            guessed_protocol,
             render_thread,
             running: true,
         };
-        
+
         app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
-        
+
         // Initial apply of default cut mode (MinMax)
         app.apply_cut_mode();
 
@@ -127,10 +138,11 @@ impl App {
             zoom: self.zoom,
             center: self.center,
             term_size: self.term_size,
+            protocol_type: self.protocol_type,
         };
         self.render_thread.request(req);
     }
-    
+
     pub fn try_update_protocol(&mut self) -> bool {
         if let Some(new_protocol) = self.render_thread.try_recv() {
             self.protocol = new_protocol;
@@ -143,7 +155,11 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent) {
         match self.input_mode {
             InputMode::Normal => self.handle_normal_key(key),
-            InputMode::EditingBlackPoint | InputMode::EditingWhitePoint => self.handle_input_key(key),
+            InputMode::EditingBlackPoint | InputMode::EditingWhitePoint => {
+                self.handle_input_key(key)
+            }
+            InputMode::Summary => self.handle_summary_key(key),
+            InputMode::Help { .. } => self.handle_help_key(key),
         }
     }
 
@@ -151,6 +167,15 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.running = false;
+            }
+            KeyCode::Char('p') => {
+                self.protocol_type = match self.protocol_type {
+                    ProtocolType::Halfblocks => ProtocolType::Sixel,
+                    ProtocolType::Sixel => ProtocolType::Kitty,
+                    ProtocolType::Kitty => ProtocolType::Iterm2,
+                    ProtocolType::Iterm2 => ProtocolType::Halfblocks,
+                };
+                self.queue_render();
             }
             KeyCode::Char('s') => {
                 self.stretch = match self.stretch {
@@ -172,6 +197,9 @@ impl App {
                 };
                 self.apply_cut_mode();
             }
+            KeyCode::Char('w') => {
+                self.input_mode = InputMode::Summary;
+            }
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::EditingBlackPoint;
                 self.input_buffer = self.black_point.to_string();
@@ -182,7 +210,9 @@ impl App {
             }
             KeyCode::Char('-') | KeyCode::Char('o') => {
                 self.zoom /= 1.5;
-                if self.zoom < 1.0 { self.zoom = 1.0; }
+                if self.zoom < 1.0 {
+                    self.zoom = 1.0;
+                }
                 self.queue_render();
             }
             KeyCode::Char('r') => {
@@ -190,7 +220,10 @@ impl App {
                 self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
                 self.queue_render();
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Char('h') => {
+                self.input_mode = InputMode::Help { scroll: 0 };
+            }
+            KeyCode::Left => {
                 let pan = self.fits.width as f64 / self.zoom * 0.5;
                 self.center.0 -= pan.max(1.0);
                 self.queue_render();
@@ -214,6 +247,53 @@ impl App {
         }
     }
 
+    fn handle_summary_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
+                self.input_mode = InputMode::Normal;
+            }
+            // Allow state changes while in summary window
+            KeyCode::Char('p')
+            | KeyCode::Char('s')
+            | KeyCode::Char('c')
+            | KeyCode::Char('z')
+            | KeyCode::Char('+')
+            | KeyCode::Char('-')
+            | KeyCode::Char('i')
+            | KeyCode::Char('o')
+            | KeyCode::Char('r')
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Char('j')
+            | KeyCode::Char('k')
+            | KeyCode::Char('l') => {
+                self.handle_normal_key(key);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_help_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let InputMode::Help { scroll } = &mut self.input_mode {
+                    *scroll = scroll.saturating_sub(1);
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let InputMode::Help { scroll } = &mut self.input_mode {
+                    *scroll = scroll.saturating_add(1);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
@@ -229,7 +309,7 @@ impl App {
                         }
                         _ => {}
                     }
-                    self.cut_mode = CutMode::Custom; 
+                    self.cut_mode = CutMode::Custom;
                     self.queue_render();
                 }
             }
@@ -263,7 +343,7 @@ impl App {
                 self.input_buffer.pop();
             }
             KeyCode::Char(c) => {
-                if c.is_digit(10) || c == '.' || c == '-' {
+                if c.is_ascii_digit() || c == '.' || c == '-' {
                     self.input_buffer.push(c);
                 }
             }
