@@ -1,0 +1,21 @@
+FROM ubuntu:18.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    pkg-config \
+    libchafa-dev \
+    libglib2.0-dev \
+    build-essential \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY . .
+
+# Build for release
+RUN cargo build --release

@@ -25,7 +25,7 @@ rayon = "1"
 
 # TUI framework
 ratatui = { version = "0.30", features = ["crossterm"] }
-ratatui-image = "10"
+ratatui-image = { version = "10", default-features = false, features = ["image-defaults", "crossterm", "chafa-static"] }
 crossterm = "0.29"
 
 # CLI
