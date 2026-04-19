@@ -140,6 +140,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         // 3. Redraw only if something changed
         if should_draw {
+            if app.clear_screen_next_frame {
+                terminal.clear()?;
+                app.clear_screen_next_frame = false;
+            }
             terminal.draw(|f| ui::draw(f, app))?;
         } else {
             // Optional: Small sleep to avoid spinning if poll() returns immediately
