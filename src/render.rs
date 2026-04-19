@@ -21,6 +21,7 @@ pub struct RenderRequest {
     pub center: (f64, f64),
     pub term_size: (u16, u16),
     pub protocol_type: ratatui_image::picker::ProtocolType,
+    pub new_fits: Option<Arc<FitsImage>>,
 }
 
 /// The response from the render thread containing the processed protocol state.
@@ -40,6 +41,7 @@ impl RenderThread {
         let (res_tx, res_rx) = mpsc::channel::<RenderResponse>();
 
         let handle = thread::spawn(move || {
+            let mut current_fits = fits;
             // Keep the latest request
             while let Ok(request) = req_rx.recv() {
                 // Drain any additional pending requests to only process the latest one
@@ -49,7 +51,11 @@ impl RenderThread {
                     latest = next;
                 }
 
-                let protocol = process_frame(&fits, &mut picker, latest);
+                if let Some(new_fits) = latest.new_fits.clone() {
+                    current_fits = new_fits;
+                }
+
+                let protocol = process_frame(&current_fits, &mut picker, latest);
                 if res_tx.send(RenderResponse::Done(protocol)).is_err() {
                     break; // main thread hung up
                 }

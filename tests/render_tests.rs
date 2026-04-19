@@ -13,7 +13,7 @@ fn example_fits_path() -> PathBuf {
 
 #[test]
 fn test_render_thread() {
-    let fits_image = fits::load_fits(&example_fits_path()).unwrap();
+    let fits_image = fits::load_fits(&example_fits_path(), None).unwrap();
     let fits_arc = Arc::new(fits_image);
     let picker = Picker::halfblocks();
 
@@ -28,6 +28,7 @@ fn test_render_thread() {
         center: (fits_arc.width as f64 / 2.0, fits_arc.height as f64 / 2.0),
         term_size: (80, 24),
         protocol_type: ratatui_image::picker::ProtocolType::Halfblocks,
+        new_fits: None,
     };
 
     render_thread.request(req);

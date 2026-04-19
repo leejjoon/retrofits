@@ -23,13 +23,17 @@ struct Cli {
     /// Protocol override (kitty, sixel, iterm2, halfblocks).
     #[arg(short, long)]
     protocol: Option<String>,
+
+    /// FITS extension to load (index or EXTNAME).
+    #[arg(short, long)]
+    ext: Option<String>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Load FITS parsing
-    let fits_image = fits::load_fits(&cli.file)?;
+    let fits_image = fits::load_fits(&cli.file, cli.ext.as_deref())?;
 
     // Initialize Ratatui terminal
     enable_raw_mode()?;

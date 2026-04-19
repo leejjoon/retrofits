@@ -34,6 +34,7 @@ pub enum InputMode {
     EditingWhitePoint,
     Summary,
     Help { scroll: u16 },
+    SelectingExtension { selected: usize },
 }
 
 pub struct App {
@@ -139,6 +140,22 @@ impl App {
             center: self.center,
             term_size: self.term_size,
             protocol_type: self.protocol_type,
+            new_fits: None,
+        };
+        self.render_thread.request(req);
+    }
+
+    pub fn queue_render_with_fits(&mut self) {
+        let req = RenderRequest {
+            stretch: self.stretch,
+            colormap: self.colormap,
+            black_point: self.black_point,
+            white_point: self.white_point,
+            zoom: self.zoom,
+            center: self.center,
+            term_size: self.term_size,
+            protocol_type: self.protocol_type,
+            new_fits: Some(self.fits.clone()),
         };
         self.render_thread.request(req);
     }
@@ -160,6 +177,7 @@ impl App {
             }
             InputMode::Summary => self.handle_summary_key(key),
             InputMode::Help { .. } => self.handle_help_key(key),
+            InputMode::SelectingExtension { .. } => self.handle_extension_key(key),
         }
     }
 
@@ -199,6 +217,11 @@ impl App {
             }
             KeyCode::Char('w') => {
                 self.input_mode = InputMode::Summary;
+            }
+            KeyCode::Char('e') => {
+                self.input_mode = InputMode::SelectingExtension {
+                    selected: self.fits.current_extension,
+                };
             }
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::EditingBlackPoint;
@@ -242,6 +265,50 @@ impl App {
                 let pan = self.fits.height as f64 / self.zoom * 0.5;
                 self.center.1 += pan.max(1.0);
                 self.queue_render();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_extension_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('e') => {
+                self.input_mode = InputMode::Normal;
+                // Important: Need to queue a render so ratatui-image gets a chance
+                // to explicitly redraw its background after the popup closes.
+                self.queue_render();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let InputMode::SelectingExtension { selected } = &mut self.input_mode {
+                    if *selected > 0 {
+                        *selected -= 1;
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let InputMode::SelectingExtension { selected } = &mut self.input_mode {
+                    if *selected + 1 < self.fits.extensions.len() {
+                        *selected += 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                if let InputMode::SelectingExtension { selected } = self.input_mode {
+                    // Check if it's an image
+                    if let Some(ext_info) = self.fits.extensions.get(selected) {
+                        if ext_info.is_image {
+                            // Try to load new extension
+                            if let Ok(new_fits) = crate::fits::load_fits(&self.fits.file_path, Some(&ext_info.index.to_string())) {
+                                self.fits = std::sync::Arc::new(new_fits);
+                                self.zoom = 1.0;
+                                self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
+                                self.apply_cut_mode(); // this queues render implicitly but we need queue_render_with_fits
+                                self.queue_render_with_fits();
+                            }
+                        }
+                    }
+                    self.input_mode = InputMode::Normal;
+                }
             }
             _ => {}
         }
