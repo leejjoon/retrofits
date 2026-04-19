@@ -138,7 +138,7 @@ impl App {
             zoom: self.zoom,
             center: self.center,
             term_size: self.term_size,
-            protocol_type: self.protocol_type,
+            protocol_type: if self.input_mode != InputMode::Normal && self.protocol_type == ratatui_image::picker::ProtocolType::Kitty { ratatui_image::picker::ProtocolType::Halfblocks } else { self.protocol_type },
         };
         self.render_thread.request(req);
     }
@@ -199,10 +199,12 @@ impl App {
             }
             KeyCode::Char('w') => {
                 self.input_mode = InputMode::Summary;
+                self.queue_render();
             }
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::EditingBlackPoint;
                 self.input_buffer = self.black_point.to_string();
+                self.queue_render();
             }
             KeyCode::Char('+') | KeyCode::Char('i') => {
                 self.zoom *= 1.5;
@@ -222,6 +224,7 @@ impl App {
             }
             KeyCode::Char('h') => {
                 self.input_mode = InputMode::Help { scroll: 0 };
+                self.queue_render();
             }
             KeyCode::Left => {
                 let pan = self.fits.width as f64 / self.zoom * 0.5;
@@ -251,6 +254,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             // Allow state changes while in summary window
             KeyCode::Char('p')
@@ -279,6 +283,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if let InputMode::Help { scroll } = &mut self.input_mode {
@@ -310,11 +315,13 @@ impl App {
                         _ => {}
                     }
                     self.cut_mode = CutMode::Custom;
-                    self.queue_render();
                 }
+                self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
                 // Switch between fields, tentatively apply current input if valid
