@@ -251,6 +251,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             // Allow state changes while in summary window
             KeyCode::Char('p')
@@ -279,6 +280,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if let InputMode::Help { scroll } = &mut self.input_mode {
@@ -315,6 +317,7 @@ impl App {
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
+                self.queue_render();
             }
             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
                 // Switch between fields, tentatively apply current input if valid
