@@ -52,7 +52,14 @@ impl FitsImage {
 
 fn is_image_hdu(hdu: &HDU) -> bool {
     match hdu {
-        HDU::Primary(_) | HDU::XImage(_) => true,
+        HDU::Primary(primary) => {
+            let naxis = primary.get_header().get_xtension().get_naxis();
+            naxis.len() >= 2 && naxis[0] > 0 && naxis[1] > 0
+        }
+        HDU::XImage(image) => {
+            let naxis = image.get_header().get_xtension().get_naxis();
+            naxis.len() >= 2 && naxis[0] > 0 && naxis[1] > 0
+        }
         _ => false,
     }
 }
