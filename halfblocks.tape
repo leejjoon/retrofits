@@ -1,4 +1,4 @@
-Output assets/kitty.gif
+Output assets/halfblocks.gif
 
 Require retrofits
 # Set FontFamily "JetBrains Mono"
