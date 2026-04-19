@@ -9,7 +9,7 @@ fn example_fits_path() -> PathBuf {
 
 #[test]
 fn test_viewport_zoom_and_pan() {
-    let fits_image = fits::load_fits(&example_fits_path()).unwrap();
+    let fits_image = fits::load_fits(&example_fits_path(), None).unwrap();
     let original_w = fits_image.width;
     let original_h = fits_image.height;
 

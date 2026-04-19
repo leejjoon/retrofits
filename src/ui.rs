@@ -102,6 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 "App Controls:",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
+            ratatui::text::Line::from("  e                  : Select FITS extension"),
             ratatui::text::Line::from(
                 "  p                  : Cycle image protocol (Halfblocks, Sixel, Kitty, iTerm2)",
             ),
@@ -321,6 +322,45 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let help_text = Paragraph::new(" [Enter] Apply  [Tab/Arrows] Switch  [Esc/q] Close ")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(help_text, inner_layout[2]);
+    }
+
+    if let InputMode::SelectingExtension { selected } = app.input_mode {
+        let area = centered_rect(50, 50, f.area());
+        f.render_widget(Clear, area);
+
+        let block = Block::default()
+            .title(" Select Extension ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let mut items = Vec::new();
+        for (i, ext) in app.fits.extensions.iter().enumerate() {
+            let style = if !ext.is_image {
+                Style::default().fg(Color::DarkGray)
+            } else if i == selected {
+                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else if i == app.fits.current_extension {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            };
+
+            let name = if ext.name.is_empty() {
+                " ".to_string()
+            } else {
+                format!(" [{}]", ext.name)
+            };
+
+            let item_text = format!("{:>3}: {:<11} {}", i, if ext.is_image { "Image" } else { "Table/Other" }, name);
+
+            items.push(ratatui::text::Line::from(Span::styled(item_text, style)));
+        }
+
+        items.push(ratatui::text::Line::from(""));
+        items.push(ratatui::text::Line::from(Span::styled(" [Enter] Load  [Esc/q/e] Close ", Style::default().fg(Color::DarkGray))));
+
+        let paragraph = Paragraph::new(items).block(block);
+        f.render_widget(paragraph, area);
     }
 }
 

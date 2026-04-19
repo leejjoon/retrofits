@@ -9,7 +9,7 @@ fn example_fits_path() -> PathBuf {
 
 #[test]
 fn test_app_creation() {
-    let fits_image = fits::load_fits(&example_fits_path()).unwrap();
+    let fits_image = fits::load_fits(&example_fits_path(), None).unwrap();
     // Use halfblocks picker for tests since it doesn't query the terminal
     let mut picker = Picker::halfblocks();
     let guessed = ratatui_image::picker::ProtocolType::Halfblocks;
@@ -34,7 +34,7 @@ fn test_app_creation() {
 
 #[test]
 fn test_quit_key() {
-    let fits_image = fits::load_fits(&example_fits_path()).unwrap();
+    let fits_image = fits::load_fits(&example_fits_path(), None).unwrap();
     let mut picker = Picker::halfblocks();
     let guessed = ratatui_image::picker::ProtocolType::Halfblocks;
     let mut app = App::new(
