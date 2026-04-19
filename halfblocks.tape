@@ -1,12 +1,16 @@
-Output assets/halfblocks.gif
+Output assets/kitty.gif
 
 Require retrofits
+# Set FontFamily "JetBrains Mono"
+Set TypingSpeed 30ms
+# Set WindowBar Colorful
 Set Shell "bash"
-Set FontSize 16
+Set FontSize 24
 Set Width 1200
 Set Height 800
-Set Margin 20
+Set Margin 0
 
-Type "./target/release/retrofits --protocol halfblocks example_fits/18109J000.fits"
+Type "retrofits --protocol halfblock example_fits/18109J000.fits"
+Sleep 1s
 Enter
 Sleep 3s

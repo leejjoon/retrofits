@@ -6,10 +6,6 @@ RetroFITS is designed to work with modern terminal emulators, utilizing memory-m
 
 ## Screenshots
 
-### Kitty Protocol
-
-![Kitty Protocol](assets/kitty.gif)
-
 ### Halfblocks Protocol
 
 ![Halfblocks Protocol](assets/halfblocks.gif)
