@@ -14,3 +14,16 @@ Changing the color while the popup was open triggered an explicit call to `self.
 
 **Fix:**
 To resolve this, explicit calls to `self.queue_render()` were added in `src/app.rs` within the key handlers (`handle_summary_key`, `handle_help_key`, and `handle_input_key`) when the `InputMode` state is changed back to `Normal`. This ensures that every time a popup window is closed, a new render request is queued, forcing the image to be fully redrawn on the terminal and overwriting the stale cleared cells.
+
+### Sixel Protocol Popup Caching Artifacts
+
+**Issue:**
+When running the application with the Sixel protocol, opening and closing a popup window results in artifacts of the popup remaining on the screen, similar to the Kitty protocol bug but with different underlying mechanics. Changing the window size or cut mode makes the artifacts disappear.
+
+**Cause:**
+`ratatui-image` internally caches the image state. Since the image parameters (zoom, stretch, image data) do not actively change when the popup is dismissed, `queue_render()` alone is not sufficient to force `ratatui-image` to emit new Sixel sequence data over the cleared popup area. The library views the resulting image payload as unchanged and skips redrawing it over the cells previously occupied by the popup.
+
+**Fix:**
+A flag `clear_screen_next_frame` was added to the `App` state. When closing a popup (changing `InputMode` to `Normal`) while the Sixel protocol is active, this flag is set to `true`. In the main render loop (`src/main.rs`), if this flag is true, `terminal.clear()?` is called immediately before drawing the next frame. This forcibly invalidates the terminal and `ratatui-image` cache, guaranteeing the Sixel image is completely redrawn.
+
+Additionally, because this behavior might cause flickering and may not be required on all terminal emulators handling Sixel sequences, this workaround is enabled by default but can be disabled using the `--disable-sixel-clear` CLI flag or by setting the `RETROFITS_DISABLE_SIXEL_CLEAR` environment variable.

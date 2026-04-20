@@ -20,6 +20,7 @@ fn test_viewport_zoom_and_pan() {
         &mut picker,
         "test.fits".to_string(),
         guessed,
+        true,
     )
     .unwrap();
 

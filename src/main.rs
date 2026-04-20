@@ -27,6 +27,10 @@ struct Cli {
     /// FITS extension to load (index or EXTNAME).
     #[arg(short, long)]
     ext: Option<String>,
+
+    /// Disable the workaround that clears the screen when a popup is closed in Sixel protocol.
+    #[arg(long, env = "RETROFITS_DISABLE_SIXEL_CLEAR")]
+    disable_sixel_clear: bool,
 }
 
 fn main() -> Result<()> {
@@ -89,6 +93,7 @@ fn main() -> Result<()> {
         &mut picker,
         filename,
         guessed_protocol,
+        !cli.disable_sixel_clear,
     )?;
 
     // Main event loop
@@ -140,6 +145,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         // 3. Redraw only if something changed
         if should_draw {
+            if app.clear_screen_next_frame {
+                terminal.clear()?;
+                app.clear_screen_next_frame = false;
+            }
             terminal.draw(|f| ui::draw(f, app))?;
         } else {
             // Optional: Small sleep to avoid spinning if poll() returns immediately

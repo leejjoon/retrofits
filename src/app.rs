@@ -58,6 +58,8 @@ pub struct App {
     pub guessed_protocol: ProtocolType,
     pub render_thread: RenderThread,
     pub running: bool,
+    pub clear_screen_next_frame: bool,
+    pub sixel_clear_workaround: bool,
 }
 
 impl App {
@@ -66,6 +68,7 @@ impl App {
         picker: &mut Picker,
         filename: String,
         guessed_protocol: ProtocolType,
+        sixel_clear_workaround: bool,
     ) -> anyhow::Result<Self> {
         let (black_point, white_point) = auto_stretch_params(fits.data.view());
         let stretch = StretchFunction::Asinh;
@@ -101,6 +104,8 @@ impl App {
             guessed_protocol,
             render_thread,
             running: true,
+            clear_screen_next_frame: false,
+            sixel_clear_workaround,
         };
 
         app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
@@ -274,6 +279,9 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('e') => {
                 self.input_mode = InputMode::Normal;
+                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
+                    self.clear_screen_next_frame = true;
+                }
                 // Important: Need to queue a render so ratatui-image gets a chance
                 // to explicitly redraw its background after the popup closes.
                 self.queue_render();
@@ -308,6 +316,9 @@ impl App {
                         }
                     }
                     self.input_mode = InputMode::Normal;
+                    if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
+                        self.clear_screen_next_frame = true;
+                    }
                 }
             }
             _ => {}
@@ -318,6 +329,9 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
                 self.input_mode = InputMode::Normal;
+                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
+                    self.clear_screen_next_frame = true;
+                }
                 self.queue_render();
             }
             // Allow state changes while in summary window
@@ -347,6 +361,9 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
                 self.input_mode = InputMode::Normal;
+                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
+                    self.clear_screen_next_frame = true;
+                }
                 self.queue_render();
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -384,6 +401,9 @@ impl App {
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.input_mode = InputMode::Normal;
+                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
+                    self.clear_screen_next_frame = true;
+                }
                 self.queue_render();
             }
             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
