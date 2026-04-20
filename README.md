@@ -19,7 +19,11 @@ RetroFITS is designed to work with modern terminal emulators, utilizing memory-m
 
 ## Installation
 
-See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+### Static Binaries (Linux)
+
+For Linux x86_64 users, fully standalone static binaries are available on the [GitHub Releases](https://github.com/leejjoon/retrofits/releases) page. These binaries have zero runtime dependencies.
+
+For other platforms or detailed build instructions, see [INSTALL.md](INSTALL.md).
 
 ## Usage
 
@@ -27,12 +31,40 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 retrofits path/to/your/image.fits
 ```
 
-By default, RetroFITS will try to auto-detect the best rendering protocol. You can force a specific protocol using the `--protocol` flag:
+By default, RetroFITS will use the `halfblocks` protocol for maximum compatibility. You can force a specific protocol using the `--protocol` flag:
 
 ```bash
 retrofits --protocol kitty image.fits
-retrofits --protocol halfblocks image.fits
+retrofits --protocol sixel image.fits
 ```
+
+## Keyboard Shortcuts
+
+### General
+- `q`, `Esc`: Quit application
+- `h`: Show help window
+- `w`: Show FITS header summary
+- `e`: Select FITS extension (for multi-extension files)
+- `R`: Force full screen redraw (useful for clearing artifacts)
+
+### Navigation
+- `Arrow Keys` or `h/j/k/l`: Pan image
+- `+`, `i`: Zoom in
+- `-`, `o`: Zoom out
+- `r`: Reset zoom and pan
+
+### Image Adjustment
+- `c`: Cycle through color maps
+- `s`: Cycle through stretch functions (Linear, Log, Asinh)
+- `z`: Cycle through cut modes (MinMax, ZScale, Custom)
+- `m`: Manually enter black/white point values
+
+### Protocol Switching
+- `p`: Cycle through rendering protocols
+- `H`: Switch to Halfblocks
+- `S`: Switch to Sixel
+- `K`: Switch to Kitty
+- `I`: Switch to iTerm2
 
 ### Sixel Artifact Workaround
 
