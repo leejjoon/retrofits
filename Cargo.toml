@@ -29,7 +29,7 @@ ratatui-image = { version = "10", default-features = false, features = ["image-d
 crossterm = "0.29"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Error handling
 anyhow = "1"
