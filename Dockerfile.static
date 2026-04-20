@@ -1,0 +1,35 @@
+FROM rust:1.95-alpine AS builder
+
+# Install build dependencies for static linking on Alpine
+RUN apk add --no-cache \
+    musl-dev \
+    gcc \
+    make \
+    pkgconfig \
+    chafa-dev \
+    glib-dev \
+    glib-static \
+    pcre2-dev \
+    pcre2-static \
+    zlib-static \
+    gettext-static \
+    libffi-dev \
+    sysprof-static
+
+WORKDIR /app
+COPY . .
+
+# Ensure pkg-config looks for static libraries
+ENV PKG_CONFIG_ALL_STATIC=1
+
+# Use target-specific RUSTFLAGS to avoid affecting proc-macros
+# We add -lgcc to resolve undefined references like __cpu_model from chafa
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-lgcc"
+
+# Explicitly specify the target to ensure host/target distinction for proc-macros
+RUN cargo build --release --target x86_64-unknown-linux-musl
+
+FROM scratch
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/retrofits /retrofits
+ENTRYPOINT ["/retrofits"]
+
