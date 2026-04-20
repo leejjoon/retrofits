@@ -33,3 +33,15 @@ By default, RetroFITS will try to auto-detect the best rendering protocol. You c
 retrofits --protocol kitty image.fits
 retrofits --protocol halfblocks image.fits
 ```
+
+### Sixel Artifact Workaround
+
+When using the Sixel protocol, opening and closing UI popups (like the Help or Summary windows) may leave lingering graphical artifacts. By default, RetroFITS forces a full screen clear to fix this caching issue on Sixel.
+
+If your terminal correctly clears the Sixel image under the popup without issues and you experience flickering with this workaround, you can disable it via a flag or environment variable:
+
+```bash
+retrofits --disable-sixel-clear image.fits
+# or via environment variable
+RETROFITS_DISABLE_SIXEL_CLEAR=1 retrofits image.fits
+```
