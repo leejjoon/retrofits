@@ -241,6 +241,15 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
                 );
             }
 
+            // Reverse rows vertically (FITS stores bottom-to-top, we render top-to-bottom)
+            for i in 0..naxis2 / 2 {
+                let top_idx = i * naxis1;
+                let bottom_idx = (naxis2 - 1 - i) * naxis1;
+                for j in 0..naxis1 {
+                    pixels_f32.swap(top_idx + j, bottom_idx + j);
+                }
+            }
+
             // Build Array2 with shape (rows=naxis2, cols=naxis1)
             let data = Array2::from_shape_vec((naxis2, naxis1), pixels_f32)
                 .context("Failed to construct 2D array from pixel data")?;
@@ -362,6 +371,15 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
                         pixels_f32.len()
                     );
                 }
+
+            // Reverse rows vertically (FITS stores bottom-to-top, we render top-to-bottom)
+            for i in 0..naxis2 / 2 {
+                let top_idx = i * naxis1;
+                let bottom_idx = (naxis2 - 1 - i) * naxis1;
+                for j in 0..naxis1 {
+                    pixels_f32.swap(top_idx + j, bottom_idx + j);
+                }
+            }
 
             // Build Array2 with shape (rows=naxis2, cols=naxis1)
             let data = Array2::from_shape_vec((naxis2, naxis1), pixels_f32)
