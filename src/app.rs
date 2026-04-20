@@ -248,6 +248,10 @@ impl App {
                 self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
                 self.queue_render();
             }
+            KeyCode::Char('R') => {
+                self.clear_screen_next_frame = true;
+                self.queue_render();
+            }
             KeyCode::Char('h') => {
                 self.input_mode = InputMode::Help { scroll: 0 };
             }
@@ -344,6 +348,7 @@ impl App {
             | KeyCode::Char('i')
             | KeyCode::Char('o')
             | KeyCode::Char('r')
+            | KeyCode::Char('R')
             | KeyCode::Left
             | KeyCode::Right
             | KeyCode::Up
