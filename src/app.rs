@@ -200,6 +200,22 @@ impl App {
                 };
                 self.queue_render();
             }
+            KeyCode::Char('H') => {
+                self.protocol_type = ProtocolType::Halfblocks;
+                self.queue_render();
+            }
+            KeyCode::Char('S') => {
+                self.protocol_type = ProtocolType::Sixel;
+                self.queue_render();
+            }
+            KeyCode::Char('K') => {
+                self.protocol_type = ProtocolType::Kitty;
+                self.queue_render();
+            }
+            KeyCode::Char('I') => {
+                self.protocol_type = ProtocolType::Iterm2;
+                self.queue_render();
+            }
             KeyCode::Char('s') => {
                 self.stretch = match self.stretch {
                     StretchFunction::Linear => StretchFunction::Logarithmic,
@@ -336,6 +352,10 @@ impl App {
             }
             // Allow state changes while in summary window
             KeyCode::Char('p')
+            | KeyCode::Char('H')
+            | KeyCode::Char('S')
+            | KeyCode::Char('K')
+            | KeyCode::Char('I')
             | KeyCode::Char('s')
             | KeyCode::Char('c')
             | KeyCode::Char('z')
