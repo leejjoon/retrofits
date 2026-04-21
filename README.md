@@ -10,6 +10,14 @@ RetroFITS is designed to work with modern terminal emulators, utilizing memory-m
 
 ![Halfblocks Protocol](assets/halfblocks.gif)
 
+### Kitty Protocol (Ghostty)
+
+![Kitty Protocol in Ghostty](assets/screenshot_retrofits_ghostty_w_kitty.png)
+
+### Sixel Protocol (Konsole)
+
+![Sixel Protocol in Konsole](assets/screenshot_retrofits_konsole_w_sixel.png)
+
 ## Features
 
 - High-performance FITS viewing directly in the terminal
