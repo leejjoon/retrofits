@@ -2,6 +2,17 @@
 
 RetroFITS is a high-performance FITS image viewer designed for modern terminal emulators. It utilizes memory-mapping and zero-copy architectures to handle large astronomical data files efficiently.
 
+## Quick Start with AI Agents
+
+If you are using an AI coding agent (e.g., Gemini CLI, Claude Code, Aider), you can automate the entire setup by running:
+
+```bash
+# Example command for an AI agent
+"Install dependencies, build the release binary, and install it to a suitable directory in my PATH"
+```
+
+The agent will handle the Rust toolchain, C libraries (`libchafa`), and the build process. It can automatically identify a suitable installation path (like `~/.local/bin` or `~/.cargo/bin`) or ask for your preference.
+
 ## Prerequisites
 
 To build and run RetroFITS, you will need:
