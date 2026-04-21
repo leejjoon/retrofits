@@ -13,7 +13,22 @@ To build and run RetroFITS, you will need:
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
         ```
 
-2.  **Terminal Emulator with Graphics Support:**
+2.  **C Library Dependencies:**
+    -   **Chafa:** RetroFITS uses the `chafa` library for high-performance image-to-text rendering and terminal graphics.
+    -   **Ubuntu/Debian:**
+        ```bash
+        sudo apt update && sudo apt install libchafa-dev
+        ```
+    -   **Fedora:**
+        ```bash
+        sudo dnf install chafa-devel
+        ```
+    -   **macOS (Homebrew):**
+        ```bash
+        brew install chafa
+        ```
+
+3.  **Terminal Emulator with Graphics Support:**
     -   While RetroFITS can fall back to Unicode half-blocks, for the best scientific analysis experience, a terminal that supports high-resolution graphics protocols is highly recommended.
     -   **Kitty Graphics Protocol (Best):** [Kitty](https://sw.kovidgoyal.net/kitty/), [WezTerm](https://wezfurlong.org/wezterm/), [Ghostty](https://ghostty.org/), [Konsole](https://konsole.kde.org/).
     -   **iTerm2 Inline Images:** [iTerm2](https://iterm2.com/), [WezTerm](https://wezfurlong.org/wezterm/), [Konsole](https://konsole.kde.org/).
