@@ -104,8 +104,10 @@ up the CLI, terminal, protocol detection, and the event loop.
   rayon. `auto_stretch_params` is a simple min / 99%-of-range heuristic.
 - `colormap.rs`: parallel (`par_chunks_exact_mut`) RGBA fill using `colorous`
   maps. Requires a contiguous array view (`unimplemented!` otherwise).
-- `zscale.rs`: samples up to 10 000 pixels, returns `median ± contrast·σ`
-  (IRAF default contrast 0.25).
+- `zscale.rs`: IRAF ZScale — samples up to 10 000 pixels, fits a line to the
+  sorted sample with iterative k-sigma rejection, and sets the window from the
+  fitted slope near the median divided by `contrast` (IRAF default 0.25). Skips
+  non-finite pixels. Outlier rejection keeps the faint background visible.
 
 ---
 
