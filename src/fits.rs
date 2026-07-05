@@ -52,12 +52,8 @@ impl FitsImage {
 
 fn is_image_hdu(hdu: &HDU) -> bool {
     match hdu {
-        HDU::Primary(primary) => {
-            let naxis = primary.get_header().get_xtension().get_naxis();
-            naxis.len() >= 2 && naxis[0] > 0 && naxis[1] > 0
-        }
-        HDU::XImage(image) => {
-            let naxis = image.get_header().get_xtension().get_naxis();
+        HDU::Primary(img) | HDU::XImage(img) => {
+            let naxis = img.get_header().get_xtension().get_naxis();
             naxis.len() >= 2 && naxis[0] > 0 && naxis[1] > 0
         }
         _ => false,
@@ -66,10 +62,23 @@ fn is_image_hdu(hdu: &HDU) -> bool {
 
 fn ext_name_from_hdu(hdu: &HDU) -> String {
     match hdu {
-        HDU::Primary(primary) => primary.get_header().get_parsed::<String>("EXTNAME").unwrap_or_default(),
-        HDU::XImage(image) => image.get_header().get_parsed::<String>("EXTNAME").unwrap_or_default(),
+        HDU::Primary(img) | HDU::XImage(img) => {
+            img.get_header().get_parsed::<String>("EXTNAME").unwrap_or_default()
+        }
         HDU::XBinaryTable(table) => table.get_header().get_parsed::<String>("EXTNAME").unwrap_or_default(),
         _ => String::new(),
+    }
+}
+
+/// Reverse rows vertically in-place (FITS stores bottom-to-top, we render
+/// top-to-bottom).
+fn flip_rows(pixels: &mut [f32], width: usize, height: usize) {
+    for i in 0..height / 2 {
+        let top_idx = i * width;
+        let bottom_idx = (height - 1 - i) * width;
+        for j in 0..width {
+            pixels.swap(top_idx + j, bottom_idx + j);
+        }
     }
 }
 
@@ -83,7 +92,7 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
     let f = File::open(path)
         .with_context(|| format!("Failed to open FITS file: {}", path.display()))?;
     let reader = BufReader::new(f);
-    let mut hdu_list = Fits::from_reader(reader);
+    let hdu_list = Fits::from_reader(reader);
 
     let mut extensions = Vec::new();
     let mut target_hdu = None;
@@ -133,9 +142,9 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
     let hdu = hdu_list.next().unwrap().unwrap();
 
     match hdu {
-        HDU::Primary(primary) => {
+        HDU::Primary(img) | HDU::XImage(img) => {
             // Extract header metadata
-            let xtension = primary.get_header().get_xtension();
+            let xtension = img.get_header().get_xtension();
             let mut header = HashMap::new();
 
             // Get axis dimensions
@@ -159,7 +168,7 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
             header.insert("BITPIX".to_string(), format!("{:?}", bitpix));
 
             // Extract additional header cards
-            for card in primary.get_header().cards() {
+            for card in img.get_header().cards() {
                 match card {
                     fitsrs::card::Card::Value { name, value }
                     | fitsrs::card::Card::Hierarch { name, value } => {
@@ -188,47 +197,25 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
                 .unwrap_or(1.0);
 
             // Read pixel data
-            let image_data = hdu_list.get_data(&primary);
+            let image_data = hdu_list.get_data(&img);
             let total_pixels = naxis1 * naxis2;
             let mut pixels_f32 = Vec::with_capacity(total_pixels);
 
+            macro_rules! read_pixels {
+                ($it:expr) => {
+                    for val in $it {
+                        let rescaled = (val as f64) * bscale + bzero;
+                        pixels_f32.push(rescaled as f32);
+                    }
+                };
+            }
             match image_data.pixels() {
-                Pixels::U8(it) => {
-                    for val in it {
-                        let rescaled = (val as f64) * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
-                Pixels::I16(it) => {
-                    for val in it {
-                        let rescaled = (val as f64) * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
-                Pixels::I32(it) => {
-                    for val in it {
-                        let rescaled = (val as f64) * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
-                Pixels::I64(it) => {
-                    for val in it {
-                        let rescaled = (val as f64) * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
-                Pixels::F32(it) => {
-                    for val in it {
-                        let rescaled = (val as f64) * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
-                Pixels::F64(it) => {
-                    for val in it {
-                        let rescaled = val * bscale + bzero;
-                        pixels_f32.push(rescaled as f32);
-                    }
-                }
+                Pixels::U8(it) => read_pixels!(it),
+                Pixels::I16(it) => read_pixels!(it),
+                Pixels::I32(it) => read_pixels!(it),
+                Pixels::I64(it) => read_pixels!(it),
+                Pixels::F32(it) => read_pixels!(it),
+                Pixels::F64(it) => read_pixels!(it),
             }
 
             if pixels_f32.len() != total_pixels {
@@ -241,145 +228,7 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
                 );
             }
 
-            // Reverse rows vertically (FITS stores bottom-to-top, we render top-to-bottom)
-            for i in 0..naxis2 / 2 {
-                let top_idx = i * naxis1;
-                let bottom_idx = (naxis2 - 1 - i) * naxis1;
-                for j in 0..naxis1 {
-                    pixels_f32.swap(top_idx + j, bottom_idx + j);
-                }
-            }
-
-            // Build Array2 with shape (rows=naxis2, cols=naxis1)
-            let data = Array2::from_shape_vec((naxis2, naxis1), pixels_f32)
-                .context("Failed to construct 2D array from pixel data")?;
-
-            Ok(FitsImage {
-                header,
-                data,
-                width: naxis1,
-                height: naxis2,
-                extensions,
-                current_extension: target_index,
-                file_path: path.to_path_buf(),
-            })
-        }
-        HDU::XImage(image) => {
-            // Extract header metadata
-            let xtension = image.get_header().get_xtension();
-            let mut header = HashMap::new();
-
-            // Get axis dimensions
-            let naxis = xtension.get_naxis();
-            if naxis.len() < 2 {
-                bail!(
-                    "Expected 2D image (NAXIS >= 2), got NAXIS = {}",
-                    naxis.len()
-                );
-            }
-
-            let naxis1 = naxis[0] as usize; // width (columns)
-            let naxis2 = naxis[1] as usize; // height (rows)
-
-            header.insert("NAXIS1".to_string(), naxis1.to_string());
-            header.insert("NAXIS2".to_string(), naxis2.to_string());
-            header.insert("NAXIS".to_string(), naxis.len().to_string());
-
-            // Extract BITPIX
-            let bitpix = xtension.get_bitpix();
-            header.insert("BITPIX".to_string(), format!("{:?}", bitpix));
-
-            // Extract additional header cards
-            for card in image.get_header().cards() {
-                match card {
-                    fitsrs::card::Card::Value { name, value }
-                    | fitsrs::card::Card::Hierarch { name, value } => {
-                        let val_str = match value {
-                            fitsrs::card::Value::Integer { value: v, .. } => v.to_string(),
-                            fitsrs::card::Value::Float { value: v, .. } => v.to_string(),
-                            fitsrs::card::Value::Logical { value: v, .. } => v.to_string(),
-                            fitsrs::card::Value::String { value: v, .. } => v.clone(),
-                            fitsrs::card::Value::Undefined => String::new(),
-                            fitsrs::card::Value::Invalid(v) => v.clone(),
-                        };
-                        header.insert(name.clone(), val_str);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Extract BZERO and BSCALE for rescaling
-            let bzero: f64 = header
-                .get("BZERO")
-                .and_then(|v| v.parse::<f64>().ok())
-                .unwrap_or(0.0);
-            let bscale: f64 = header
-                .get("BSCALE")
-                .and_then(|v| v.parse::<f64>().ok())
-                .unwrap_or(1.0);
-
-            // Read pixel data
-            let image_data = hdu_list.get_data(&image);
-            let total_pixels = naxis1 * naxis2;
-            let mut pixels_f32 = Vec::with_capacity(total_pixels);
-
-                match image_data.pixels() {
-                    Pixels::U8(it) => {
-                        for val in it {
-                            let rescaled = (val as f64) * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                    Pixels::I16(it) => {
-                        for val in it {
-                            let rescaled = (val as f64) * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                    Pixels::I32(it) => {
-                        for val in it {
-                            let rescaled = (val as f64) * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                    Pixels::I64(it) => {
-                        for val in it {
-                            let rescaled = (val as f64) * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                    Pixels::F32(it) => {
-                        for val in it {
-                            let rescaled = (val as f64) * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                    Pixels::F64(it) => {
-                        for val in it {
-                            let rescaled = val * bscale + bzero;
-                            pixels_f32.push(rescaled as f32);
-                        }
-                    }
-                }
-
-                if pixels_f32.len() != total_pixels {
-                    bail!(
-                        "Expected {} pixels ({}x{}), but read {}",
-                        total_pixels,
-                        naxis1,
-                        naxis2,
-                        pixels_f32.len()
-                    );
-                }
-
-            // Reverse rows vertically (FITS stores bottom-to-top, we render top-to-bottom)
-            for i in 0..naxis2 / 2 {
-                let top_idx = i * naxis1;
-                let bottom_idx = (naxis2 - 1 - i) * naxis1;
-                for j in 0..naxis1 {
-                    pixels_f32.swap(top_idx + j, bottom_idx + j);
-                }
-            }
+            flip_rows(&mut pixels_f32, naxis1, naxis2);
 
             // Build Array2 with shape (rows=naxis2, cols=naxis1)
             let data = Array2::from_shape_vec((naxis2, naxis1), pixels_f32)
