@@ -616,7 +616,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                     " (x={}, y={})  value={:.6e}   h/j/k/l:move  x/Esc:exit ",
                     fits_x, fits_y, value
                 ),
-                base.fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+                // Stick to the bar's own white-on-blue: named accent colors
+                // (e.g. LightCyan) are palette-dependent and can render as
+                // low-contrast dark teal on some terminals (Konsole/Breeze).
+                base.add_modifier(Modifier::BOLD),
             )
         }
         (_, Some(msg)) => {
