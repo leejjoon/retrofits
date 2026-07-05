@@ -65,6 +65,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         _ => (main, None),
     };
 
+    // Sixel data is encoded in 6-pixel bands, so the emitted image can round
+    // up past the area's last cell row; some emulators (konsole) then advance
+    // the cursor past the row and scroll the screen by one line, leaving a
+    // stale copy of the bottom row inside the image region. Keep a one-row
+    // gutter below the image so the emit never touches the terminal's
+    // bottom rows.
+    let image_area = if app.protocol_type == ratatui_image::picker::ProtocolType::Sixel
+        && image_area.height > 1
+    {
+        Rect {
+            height: image_area.height - 1,
+            ..image_area
+        }
+    } else {
+        image_area
+    };
+
     // Below 1x zoom, draw the image into a centered sub-rect shrunk by the
     // zoom factor; the render request sees the sub-rect size and renders the
     // whole image at fit scale into it.

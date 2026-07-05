@@ -18,6 +18,21 @@ The `R` key remains as a manual force-clear escape hatch, and the crosshair
 is composited into the rendered RGBA (in the render thread) rather than drawn
 over terminal cells for the same reason.
 
+These properties are regression-tested against real emulators by
+`tests/visual/run.sh` (kitty and konsole under Xvfb, pixel-diffed
+screenshots); see `tests/visual/README.md`.
+
+### Sixel one-row gutter (konsole scroll quirk)
+
+Sixel data is encoded in 6-pixel-tall bands, so an emitted image can round up
+past the last cell row of its area. Konsole then advances the cursor past
+that row and **scrolls the screen by one line**, leaving a stale copy of the
+bottom row inside the image region (visible as a duplicated status-bar line
+after startup and after every re-encode). This is pre-existing emulator
+behavior, reproduced with builds from before the panel-layout change.
+The fix (in `ui::draw`): when the active protocol is Sixel, the image area is
+shrunk by one row so the emit never touches the terminal's bottom rows.
+
 ## Historical issues (fixed by the panel layout above)
 
 The following two workarounds existed while popups were still drawn as
