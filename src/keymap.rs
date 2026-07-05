@@ -36,6 +36,7 @@ pub enum Action {
     OpenProtocolPicker,
     SetProtocol(ProtocolType),
     ToggleCrosshair,
+    ToggleMouse,
 }
 
 pub struct Binding {
@@ -298,6 +299,14 @@ pub static KEYMAP: &[Binding] = &[
         category: "App Controls",
         help: "Show help",
         global: false,
+    },
+    Binding {
+        keys: &[KeyCode::Char('M')],
+        mods: KeyModifiers::NONE,
+        action: Action::ToggleMouse,
+        category: "App Controls",
+        help: "Toggle mouse (scroll:zoom, drag:pan, click:select)",
+        global: true,
     },
     Binding {
         keys: &[KeyCode::Char('R')],

@@ -5,7 +5,7 @@ use retrofits::ui;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -27,6 +27,12 @@ struct Cli {
     /// FITS extension to load (index or EXTNAME).
     #[arg(short, long)]
     ext: Option<String>,
+
+    /// Enable mouse support (scroll to zoom, drag to pan, click to select).
+    /// Note: mouse capture disables native terminal text selection.
+    /// Can also be toggled at runtime with the `M` key.
+    #[arg(long)]
+    mouse: bool,
 }
 
 fn main() -> Result<()> {
@@ -90,13 +96,18 @@ fn main() -> Result<()> {
         filename,
         guessed_protocol,
     )?;
+    app.mouse_enabled = cli.mouse;
 
     // Main event loop
     let res = run_app(&mut terminal, &mut app);
 
-    // Restore terminal
+    // Restore terminal (always disable mouse capture; harmless if inactive)
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     if let Err(err) = res {
@@ -113,8 +124,21 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     // Initial draw
     terminal.draw(|f| ui::draw(f, app))?;
 
+    // Actual terminal mouse-capture state, synced to app.mouse_enabled.
+    let mut mouse_captured = false;
+
     while app.running {
         let mut should_draw = false;
+
+        // Sync mouse capture with the app setting (--mouse flag / M toggle)
+        if app.mouse_enabled != mouse_captured {
+            if app.mouse_enabled {
+                execute!(io::stdout(), EnableMouseCapture)?;
+            } else {
+                execute!(io::stdout(), DisableMouseCapture)?;
+            }
+            mouse_captured = app.mouse_enabled;
+        }
 
         // 1. Check for incoming render thread frames
         if app.try_update_protocol() {
@@ -134,6 +158,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                 Event::Key(key) => {
                     app.handle_key(key);
                     should_draw = true;
+                }
+                Event::Mouse(ev) => {
+                    if app.handle_mouse(ev) {
+                        should_draw = true;
+                    }
                 }
                 Event::Resize(_w, _h) => {
                     // Force a redraw on resize

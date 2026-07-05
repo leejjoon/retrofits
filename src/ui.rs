@@ -31,11 +31,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Full-screen pages replace the image entirely.
     if let InputMode::Help { scroll } = app.input_mode {
+        app.image_area = Rect::default();
+        app.panel_area = None;
         draw_help_page(f, main, scroll);
         draw_status_bar(f, app, outer[1]);
         return;
     }
     if matches!(app.input_mode, InputMode::HeaderView { .. }) {
+        app.image_area = Rect::default();
+        app.panel_area = None;
         draw_header_page(f, app, main);
         draw_status_bar(f, app, outer[1]);
         return;
@@ -84,6 +88,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.term_size = new_term_size;
         app.queue_render();
     }
+
+    // Remember where things were drawn for mouse hit-testing.
+    app.image_area = image_area;
+    app.panel_area = panel_area;
 
     // Main image area
     let image_widget = StatefulImage::default().resize(Resize::Scale(None));

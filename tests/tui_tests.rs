@@ -266,6 +266,48 @@ fn test_crosshair_mode() {
 }
 
 #[test]
+fn test_mouse_zoom_and_drag() {
+    use crossterm::event::{
+        KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
+    use ratatui::layout::Rect;
+
+    fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: col,
+            row,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    let mut app = test_app();
+    // Simulate the layout normally recorded by ui::draw.
+    app.image_area = Rect::new(0, 0, 80, 24);
+    app.term_size = (80, 24);
+
+    // M toggles mouse mode on.
+    assert!(!app.mouse_enabled);
+    app.handle_key(key(KeyCode::Char('M')));
+    assert!(app.mouse_enabled);
+
+    // Scroll up zooms in.
+    let z0 = app.zoom;
+    assert!(app.handle_mouse(mouse(MouseEventKind::ScrollUp, 40, 12)));
+    assert!(app.zoom > z0);
+
+    // Drag pans: press, then drag left -> center moves right.
+    let c0 = app.center;
+    app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 40, 12));
+    assert!(app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 30, 12)));
+    assert!(app.center.0 > c0.0);
+    app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 30, 12));
+
+    // Events outside the image area are ignored.
+    assert!(!app.handle_mouse(mouse(MouseEventKind::ScrollUp, 100, 40)));
+}
+
+#[test]
 fn test_protocol_picker() {
     use crossterm::event::KeyCode;
     use ratatui_image::picker::ProtocolType;

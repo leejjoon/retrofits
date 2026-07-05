@@ -5,8 +5,9 @@ use crate::render::{RenderRequest, RenderThread};
 use crate::stretch::{auto_stretch_params, compute_stretch, StretchFunction};
 use crate::zscale::estimate_zscale;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use image::DynamicImage;
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
@@ -150,6 +151,17 @@ pub struct App {
     /// terminal-emulator rendering artifact.
     pub clear_screen_next_frame: bool,
     pub message: Option<StatusMessage>,
+    /// Whether mouse capture is requested (`--mouse` flag or `M` toggle).
+    /// The event loop syncs actual terminal capture to this. Off by default
+    /// because capture breaks native terminal text selection.
+    pub mouse_enabled: bool,
+    /// Screen rect the image was last drawn into (set by `ui::draw`),
+    /// used for mouse hit-testing.
+    pub image_area: Rect,
+    /// Screen rect of the open side/bottom panel, if any (set by `ui::draw`).
+    pub panel_area: Option<Rect>,
+    /// Last mouse cell position while a left-button drag is in progress.
+    drag_last: Option<(u16, u16)>,
 }
 
 impl App {
@@ -197,6 +209,10 @@ impl App {
             running: true,
             clear_screen_next_frame: false,
             message: None,
+            mouse_enabled: false,
+            image_area: Rect::default(),
+            panel_area: None,
+            drag_last: None,
         };
 
         app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
@@ -534,6 +550,17 @@ impl App {
                     state: ListState::default().with_selected(Some(current)),
                 };
             }
+            Action::ToggleMouse => {
+                self.mouse_enabled = !self.mouse_enabled;
+                self.notify(
+                    Severity::Info,
+                    if self.mouse_enabled {
+                        "Mouse: on (scroll:zoom, drag:pan; terminal text selection disabled)"
+                    } else {
+                        "Mouse: off"
+                    },
+                );
+            }
             Action::ToggleCrosshair => {
                 // Start at the center of the visible area.
                 let vr = self.visible_rect();
@@ -774,6 +801,161 @@ impl App {
         }
         if close {
             self.close_mode();
+        }
+    }
+
+    /// Map a terminal cell to fractional (0..1) coordinates inside the image
+    /// area, if the cell is within it.
+    fn cell_fraction(&self, col: u16, row: u16) -> Option<(f64, f64)> {
+        let ia = self.image_area;
+        if ia.width == 0
+            || ia.height == 0
+            || col < ia.x
+            || col >= ia.x + ia.width
+            || row < ia.y
+            || row >= ia.y + ia.height
+        {
+            return None;
+        }
+        Some((
+            ((col - ia.x) as f64 + 0.5) / ia.width as f64,
+            ((row - ia.y) as f64 + 0.5) / ia.height as f64,
+        ))
+    }
+
+    /// Map a terminal cell to image pixel coordinates.
+    fn cell_to_image_px(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let (fx, fy) = self.cell_fraction(col, row)?;
+        let vr = self.visible_rect();
+        let x = (vr.x as f64 + fx * vr.width as f64) as usize;
+        let y = (vr.y as f64 + fy * vr.height as f64) as usize;
+        Some((
+            x.min(self.fits.width.saturating_sub(1)),
+            y.min(self.fits.height.saturating_sub(1)),
+        ))
+    }
+
+    /// Zoom keeping the image point under the given cell stationary.
+    fn zoom_at(&mut self, col: u16, row: u16, zoom_in: bool) {
+        let Some((fx, fy)) = self.cell_fraction(col, row) else {
+            return;
+        };
+        let vr = self.visible_rect();
+        let px = vr.x as f64 + fx * vr.width as f64;
+        let py = vr.y as f64 + fy * vr.height as f64;
+
+        self.zoom = if zoom_in {
+            self.zoom * 1.5
+        } else {
+            (self.zoom / 1.5).max(MIN_ZOOM)
+        };
+
+        // With the new crop size, place the center so the point stays at the
+        // same screen fraction.
+        let vr2 = self.visible_rect();
+        self.center = (
+            px - (fx - 0.5) * vr2.width as f64,
+            py - (fy - 0.5) * vr2.height as f64,
+        );
+        self.queue_render();
+    }
+
+    /// Handle a click inside an open picker panel: first click selects the
+    /// row under the cursor, a click on the already-selected row activates it.
+    fn panel_click(&mut self, row: u16) {
+        let Some(panel) = self.panel_area else {
+            return;
+        };
+        // +1 skips the panel border/title row.
+        let clicked = (row.saturating_sub(panel.y + 1)) as usize;
+        let enter = KeyEvent::from(KeyCode::Enter);
+        match &mut self.input_mode {
+            InputMode::SelectingExtension { state } => {
+                let idx = clicked + state.offset();
+                if idx < self.fits.extensions.len() {
+                    if state.selected() == Some(idx) {
+                        self.handle_extension_key(enter);
+                    } else {
+                        state.select(Some(idx));
+                    }
+                }
+            }
+            InputMode::SelectingProtocol { state } => {
+                let idx = clicked + state.offset();
+                if idx < PROTOCOLS.len() {
+                    if state.selected() == Some(idx) {
+                        self.handle_protocol_key(enter);
+                    } else {
+                        state.select(Some(idx));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle a mouse event. Returns `true` if state changed and a redraw
+    /// is needed.
+    pub fn handle_mouse(&mut self, ev: MouseEvent) -> bool {
+        let in_image = self.cell_fraction(ev.column, ev.row).is_some();
+        let in_panel = self
+            .panel_area
+            .is_some_and(|p| p.contains(ratatui::layout::Position::new(ev.column, ev.row)));
+
+        match ev.kind {
+            MouseEventKind::ScrollUp if in_image => {
+                self.zoom_at(ev.column, ev.row, true);
+                true
+            }
+            MouseEventKind::ScrollDown if in_image => {
+                self.zoom_at(ev.column, ev.row, false);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_panel => {
+                self.panel_click(ev.row);
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_image => {
+                self.drag_last = Some((ev.column, ev.row));
+                if matches!(self.input_mode, InputMode::Crosshair { .. }) {
+                    if let Some(px) = self.cell_to_image_px(ev.column, ev.row) {
+                        if let InputMode::Crosshair { pos } = &mut self.input_mode {
+                            *pos = px;
+                        }
+                        self.queue_render();
+                    }
+                }
+                true
+            }
+            MouseEventKind::Drag(MouseButton::Left) if in_image => {
+                if matches!(self.input_mode, InputMode::Crosshair { .. }) {
+                    // Dragging in crosshair mode moves the crosshair.
+                    if let Some(px) = self.cell_to_image_px(ev.column, ev.row) {
+                        if let InputMode::Crosshair { pos } = &mut self.input_mode {
+                            *pos = px;
+                        }
+                        self.queue_render();
+                        return true;
+                    }
+                    return false;
+                }
+                let Some(last) = self.drag_last else {
+                    return false;
+                };
+                let vr = self.visible_rect();
+                let ppc_x = vr.width as f64 / self.image_area.width.max(1) as f64;
+                let ppc_y = vr.height as f64 / self.image_area.height.max(1) as f64;
+                self.center.0 -= (ev.column as f64 - last.0 as f64) * ppc_x;
+                self.center.1 -= (ev.row as f64 - last.1 as f64) * ppc_y;
+                self.drag_last = Some((ev.column, ev.row));
+                self.queue_render();
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.drag_last = None;
+                false
+            }
+            _ => false,
         }
     }
 
