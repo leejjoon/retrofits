@@ -54,6 +54,20 @@ pub fn protocol_name(p: ProtocolType) -> &'static str {
     }
 }
 
+/// less-style incremental search state for the header viewer.
+#[derive(Debug, Default)]
+pub struct HeaderSearch {
+    /// True while the `/` prompt is capturing input.
+    pub input_active: bool,
+    pub query: String,
+    /// Indices of matching header lines, sorted ascending.
+    pub matches: Vec<usize>,
+    /// Index into `matches` of the current match.
+    pub current: usize,
+    /// Scroll position when the search prompt was opened (restored on Esc).
+    pub saved_scroll: usize,
+}
+
 #[derive(Debug)]
 pub enum InputMode {
     Normal,
@@ -61,6 +75,7 @@ pub enum InputMode {
     EditingWhitePoint,
     Summary,
     Help { scroll: u16 },
+    HeaderView { scroll: usize, search: HeaderSearch },
     SelectingExtension { state: ListState },
 }
 
@@ -255,6 +270,7 @@ impl App {
             }
             InputMode::Summary => self.handle_summary_key(key),
             InputMode::Help { .. } => self.handle_help_key(key),
+            InputMode::HeaderView { .. } => self.handle_header_key(key),
             InputMode::SelectingExtension { .. } => self.handle_extension_key(key),
         }
     }
@@ -323,6 +339,12 @@ impl App {
             }
             Action::OpenHelp => {
                 self.input_mode = InputMode::Help { scroll: 0 };
+            }
+            Action::OpenHeader => {
+                self.input_mode = InputMode::HeaderView {
+                    scroll: 0,
+                    search: HeaderSearch::default(),
+                };
             }
             Action::ZoomIn => {
                 self.zoom *= 1.5;
@@ -446,6 +468,108 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Recompute search matches over the header lines and jump to the first
+    /// match at/after where the search started (less-style incremental find).
+    fn update_header_matches(fits: &FitsImage, search: &mut HeaderSearch, scroll: &mut usize) {
+        let q = search.query.to_ascii_lowercase();
+        search.matches = if q.is_empty() {
+            Vec::new()
+        } else {
+            fits.header
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.display_text().to_ascii_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect()
+        };
+        if search.matches.is_empty() {
+            search.current = 0;
+            *scroll = search.saved_scroll;
+        } else {
+            search.current = search
+                .matches
+                .iter()
+                .position(|&i| i >= search.saved_scroll)
+                .unwrap_or(0);
+            *scroll = search.matches[search.current];
+        }
+    }
+
+    fn handle_header_key(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyModifiers;
+
+        let fits = self.fits.clone();
+        let total = fits.header.0.len();
+        let last = total.saturating_sub(1);
+        let page = (self.term_size.1.max(2) as usize).saturating_sub(2); // minus border rows
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        let mut close = false;
+        if let InputMode::HeaderView { scroll, search } = &mut self.input_mode {
+            if search.input_active {
+                match key.code {
+                    KeyCode::Esc => {
+                        // Cancel the search: clear it and restore the view.
+                        search.input_active = false;
+                        search.query.clear();
+                        search.matches.clear();
+                        *scroll = search.saved_scroll;
+                    }
+                    KeyCode::Enter => {
+                        // Confirm: keep matches highlighted, leave the prompt.
+                        search.input_active = false;
+                    }
+                    KeyCode::Backspace => {
+                        search.query.pop();
+                        Self::update_header_matches(&fits, search, scroll);
+                    }
+                    KeyCode::Char(c) => {
+                        search.query.push(c);
+                        Self::update_header_matches(&fits, search, scroll);
+                    }
+                    _ => {}
+                }
+            } else {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('v') => close = true,
+                    KeyCode::Down | KeyCode::Char('j') => *scroll = (*scroll + 1).min(last),
+                    KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+                    KeyCode::PageDown => *scroll = (*scroll + page).min(last),
+                    KeyCode::PageUp => *scroll = scroll.saturating_sub(page),
+                    KeyCode::Char('d') if ctrl => *scroll = (*scroll + page / 2).min(last),
+                    KeyCode::Char('u') if ctrl => *scroll = scroll.saturating_sub(page / 2),
+                    KeyCode::Char('g') => *scroll = 0,
+                    KeyCode::Char('G') => *scroll = last,
+                    KeyCode::Char('/') => {
+                        search.input_active = true;
+                        search.saved_scroll = *scroll;
+                        search.query.clear();
+                        search.matches.clear();
+                        search.current = 0;
+                    }
+                    KeyCode::Char('n') => {
+                        if !search.matches.is_empty() {
+                            search.current = (search.current + 1) % search.matches.len();
+                            *scroll = search.matches[search.current];
+                        }
+                    }
+                    KeyCode::Char('N') => {
+                        if !search.matches.is_empty() {
+                            search.current =
+                                (search.current + search.matches.len() - 1) % search.matches.len();
+                            *scroll = search.matches[search.current];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if close {
+            self.close_mode();
         }
     }
 

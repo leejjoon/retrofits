@@ -30,6 +30,7 @@ pub enum Action {
     OpenManualCut,
     OpenSummary,
     OpenExtensionPicker,
+    OpenHeader,
     OpenHelp,
     CycleProtocol,
     SetProtocol(ProtocolType),
@@ -131,6 +132,13 @@ pub static KEYMAP: &[Binding] = &[
         action: Action::OpenExtensionPicker,
         category: "App Controls",
         help: "Select FITS extension",
+        global: false,
+    },
+    Binding {
+        keys: &[KeyCode::Char('v')],
+        action: Action::OpenHeader,
+        category: "App Controls",
+        help: "View FITS header (searchable with /)",
         global: false,
     },
     Binding {
