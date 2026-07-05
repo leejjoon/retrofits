@@ -1,12 +1,27 @@
 use crate::app::{App, InputMode};
+use crate::keymap;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, Clear, Paragraph},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
+
+/// Clear a centered area, draw a bordered popup frame, and return the inner
+/// rect content should be rendered into.
+fn popup_frame(f: &mut Frame, title: &str, color: Color, percent_x: u16, percent_y: u16) -> Rect {
+    let area = centered_rect(percent_x, percent_y, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(format!(" {} ", title))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(color));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    inner
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -67,63 +82,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(status_bar, chunks[1]);
 
     if let InputMode::Help { scroll } = app.input_mode {
-        let area = centered_rect(50, 60, f.area());
-        f.render_widget(Clear, area);
-
-        let block = Block::default()
-            .title(" Help / Keybindings ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
-
-        let help_lines = vec![
-            ratatui::text::Line::from(vec![Span::styled(
-                "Navigation:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )]),
-            ratatui::text::Line::from("  Arrow Keys / j,k,l : Pan image"), // removed 'h' from pan
-            ratatui::text::Line::from("  + / i              : Zoom in"),
-            ratatui::text::Line::from("  - / o              : Zoom out"),
-            ratatui::text::Line::from("  r                  : Reset zoom and center"),
-            ratatui::text::Line::from(""),
-            ratatui::text::Line::from(vec![Span::styled(
-                "Image Controls:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )]),
-            ratatui::text::Line::from(
-                "  s                  : Cycle stretch function (Linear, Log, Asinh)",
-            ),
-            ratatui::text::Line::from("  c                  : Cycle colormap"),
-            ratatui::text::Line::from(
-                "  z                  : Cycle cut mode (MinMax, ZScale, Custom)",
-            ),
-            ratatui::text::Line::from("  m                  : Set custom cut points (manual)"),
-            ratatui::text::Line::from(""),
-            ratatui::text::Line::from(vec![Span::styled(
-                "App Controls:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )]),
-            ratatui::text::Line::from("  e                  : Select FITS extension"),
-            ratatui::text::Line::from(
-                "  p                  : Cycle image protocol (Halfblocks, Sixel, Kitty, iTerm2)",
-            ),
-            ratatui::text::Line::from("  w                  : Toggle summary window"),
-            ratatui::text::Line::from("  h                  : Toggle help window"),
-            ratatui::text::Line::from("  q / Esc            : Quit application / Close popups"),
-        ];
-
-        let paragraph = Paragraph::new(help_lines).block(block).scroll((scroll, 0));
-
-        f.render_widget(paragraph, area);
+        let inner = popup_frame(f, "Help / Keybindings", Color::Cyan, 50, 60);
+        let paragraph = Paragraph::new(help_lines()).scroll((scroll, 0));
+        f.render_widget(paragraph, inner);
     }
 
-    if app.input_mode == InputMode::Summary {
-        let area = centered_rect(50, 60, f.area());
-        f.render_widget(Clear, area);
-
-        let block = Block::default()
-            .title(" Viewport Summary ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green));
+    if matches!(app.input_mode, InputMode::Summary) {
+        let inner = popup_frame(f, "Viewport Summary", Color::Green, 50, 60);
 
         let mut text = vec![
             ratatui::text::Line::from(vec![
@@ -241,23 +206,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Style::default().fg(Color::DarkGray),
         )));
 
-        let paragraph = Paragraph::new(text).block(block);
-        f.render_widget(paragraph, area);
+        let paragraph = Paragraph::new(text);
+        f.render_widget(paragraph, inner);
     }
 
     // Handle Manual Cut Popup
-    if app.input_mode == InputMode::EditingBlackPoint
-        || app.input_mode == InputMode::EditingWhitePoint
-    {
-        let area = centered_rect(60, 25, f.area());
-        f.render_widget(Clear, area);
-
-        let block = Block::default()
-            .title(" Manual Cut Entry ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow));
-
-        f.render_widget(block, area);
+    if matches!(
+        app.input_mode,
+        InputMode::EditingBlackPoint | InputMode::EditingWhitePoint
+    ) {
+        let inner = popup_frame(f, "Manual Cut Entry", Color::Yellow, 60, 25);
 
         let inner_layout = Layout::default()
             .direction(Direction::Vertical)
@@ -266,15 +224,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 Constraint::Length(3),
                 Constraint::Length(1),
             ])
-            .margin(1)
-            .split(area);
+            .split(inner);
 
         let entry_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(inner_layout[1]);
 
-        let black_style = if app.input_mode == InputMode::EditingBlackPoint {
+        let editing_black = matches!(app.input_mode, InputMode::EditingBlackPoint);
+
+        let black_style = if editing_black {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
@@ -282,7 +241,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Style::default()
         };
 
-        let white_style = if app.input_mode == InputMode::EditingWhitePoint {
+        let white_style = if !editing_black {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
@@ -290,13 +249,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Style::default()
         };
 
-        let black_text = if app.input_mode == InputMode::EditingBlackPoint {
+        let black_text = if editing_black {
             &app.input_buffer
         } else {
             &format!("{:.6}", app.black_point)
         };
 
-        let white_text = if app.input_mode == InputMode::EditingWhitePoint {
+        let white_text = if !editing_black {
             &app.input_buffer
         } else {
             &format!("{:.6}", app.white_point)
@@ -324,44 +283,89 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(help_text, inner_layout[2]);
     }
 
-    if let InputMode::SelectingExtension { selected } = app.input_mode {
-        let area = centered_rect(50, 50, f.area());
-        f.render_widget(Clear, area);
+    if matches!(app.input_mode, InputMode::SelectingExtension { .. }) {
+        let inner = popup_frame(f, "Select Extension", Color::Cyan, 50, 50);
 
-        let block = Block::default()
-            .title(" Select Extension ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+        let list_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(inner);
 
-        let mut items = Vec::new();
-        for (i, ext) in app.fits.extensions.iter().enumerate() {
-            let style = if !ext.is_image {
-                Style::default().fg(Color::DarkGray)
-            } else if i == selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
-            } else if i == app.fits.current_extension {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
-            };
+        let current = app.fits.current_extension;
+        let items: Vec<ListItem> = app
+            .fits
+            .extensions
+            .iter()
+            .enumerate()
+            .map(|(i, ext)| {
+                let style = if !ext.is_image {
+                    Style::default().fg(Color::DarkGray)
+                } else if i == current {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default()
+                };
 
-            let name = if ext.name.is_empty() {
-                " ".to_string()
-            } else {
-                format!(" [{}]", ext.name)
-            };
+                let name = if ext.name.is_empty() {
+                    " ".to_string()
+                } else {
+                    format!(" [{}]", ext.name)
+                };
 
-            let item_text = format!("{:>3}: {:<11} {}", i, if ext.is_image { "Image" } else { "Table/Other" }, name);
+                let item_text = format!(
+                    "{:>3}: {:<11} {}",
+                    i,
+                    if ext.is_image { "Image" } else { "Table/Other" },
+                    name
+                );
+                ListItem::new(Line::from(Span::styled(item_text, style)))
+            })
+            .collect();
 
-            items.push(ratatui::text::Line::from(Span::styled(item_text, style)));
+        let list = List::new(items).highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        if let InputMode::SelectingExtension { state } = &mut app.input_mode {
+            f.render_stateful_widget(list, list_layout[0], state);
         }
 
-        items.push(ratatui::text::Line::from(""));
-        items.push(ratatui::text::Line::from(Span::styled(" [Enter] Load  [Esc/q/e] Close ", Style::default().fg(Color::DarkGray))));
-
-        let paragraph = Paragraph::new(items).block(block);
-        f.render_widget(paragraph, area);
+        let hint = Paragraph::new(Span::styled(
+            " [Enter] Load  [Esc/q/e] Close ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(hint, list_layout[1]);
     }
+}
+
+/// Build the help window content from the keymap, grouped by category, so
+/// the displayed shortcuts always match the actual bindings.
+fn help_lines() -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut last_category = "";
+    for binding in keymap::KEYMAP {
+        if binding.category != last_category {
+            if !last_category.is_empty() {
+                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(Span::styled(
+                format!("{}:", binding.category),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            last_category = binding.category;
+        }
+        let keys = binding
+            .keys
+            .iter()
+            .map(keymap::key_name)
+            .collect::<Vec<_>>()
+            .join(" / ");
+        lines.push(Line::from(format!("  {:<18} : {}", keys, binding.help)));
+    }
+    lines
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

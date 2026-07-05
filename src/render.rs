@@ -45,13 +45,19 @@ impl RenderThread {
             // Keep the latest request
             while let Ok(request) = req_rx.recv() {
                 // Drain any additional pending requests to only process the latest one
-                // This debounces rapid keyboard inputs.
+                // This debounces rapid keyboard inputs. A fits swap carried by a
+                // drained (skipped) request must still be applied, otherwise a
+                // later fits-less request would render the stale image.
                 let mut latest = request;
+                let mut pending_fits = latest.new_fits.take();
                 while let Ok(next) = req_rx.try_recv() {
                     latest = next;
+                    if let Some(fits) = latest.new_fits.take() {
+                        pending_fits = Some(fits);
+                    }
                 }
 
-                if let Some(new_fits) = latest.new_fits.clone() {
+                if let Some(new_fits) = pending_fits {
                     current_fits = new_fits;
                 }
 

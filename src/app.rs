@@ -1,11 +1,13 @@
 use crate::colormap::{apply_colormap, ColormapName};
 use crate::fits::FitsImage;
+use crate::keymap::{self, Action, PanDirection};
 use crate::render::{RenderRequest, RenderThread};
 use crate::stretch::{auto_stretch_params, compute_stretch, StretchFunction};
 use crate::zscale::estimate_zscale;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use image::DynamicImage;
+use ratatui::widgets::ListState;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use std::sync::Arc;
@@ -27,14 +29,14 @@ impl std::fmt::Display for CutMode {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum InputMode {
     Normal,
     EditingBlackPoint,
     EditingWhitePoint,
     Summary,
     Help { scroll: u16 },
-    SelectingExtension { selected: usize },
+    SelectingExtension { state: ListState },
 }
 
 pub struct App {
@@ -116,7 +118,9 @@ impl App {
         Ok(app)
     }
 
-    pub fn apply_cut_mode(&mut self) {
+    /// Recompute black/white points from the current cut mode without
+    /// queueing a render.
+    pub fn compute_cuts(&mut self) {
         match self.cut_mode {
             CutMode::MinMax => {
                 self.black_point = self.fits.min_value();
@@ -132,6 +136,10 @@ impl App {
                 self.white_point = self.custom_white_point;
             }
         }
+    }
+
+    pub fn apply_cut_mode(&mut self) {
+        self.compute_cuts();
         self.queue_render();
     }
 
@@ -174,6 +182,20 @@ impl App {
         }
     }
 
+    /// Leave the current popup/mode and return to [`InputMode::Normal`].
+    ///
+    /// Centralizes the redraw handling every popup close needs: ratatui-image
+    /// must repaint the cells the popup blanked, so a render is queued; under
+    /// Sixel the encoded image may be cached as already-drawn, so the screen
+    /// is additionally cleared (see DEVELOP.md).
+    pub fn close_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        if self.protocol_type == ProtocolType::Sixel && self.sixel_clear_workaround {
+            self.clear_screen_next_frame = true;
+        }
+        self.queue_render();
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         match self.input_mode {
             InputMode::Normal => self.handle_normal_key(key),
@@ -187,11 +209,18 @@ impl App {
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
+        if let Some(binding) = keymap::lookup(key) {
+            self.dispatch(binding.action);
+        }
+    }
+
+    /// Execute a normal-mode action from the keymap.
+    pub fn dispatch(&mut self, action: Action) {
+        match action {
+            Action::Quit => {
                 self.running = false;
             }
-            KeyCode::Char('p') => {
+            Action::CycleProtocol => {
                 self.protocol_type = match self.protocol_type {
                     ProtocolType::Halfblocks => ProtocolType::Sixel,
                     ProtocolType::Sixel => ProtocolType::Kitty,
@@ -200,23 +229,11 @@ impl App {
                 };
                 self.queue_render();
             }
-            KeyCode::Char('H') => {
-                self.protocol_type = ProtocolType::Halfblocks;
+            Action::SetProtocol(p) => {
+                self.protocol_type = p;
                 self.queue_render();
             }
-            KeyCode::Char('S') => {
-                self.protocol_type = ProtocolType::Sixel;
-                self.queue_render();
-            }
-            KeyCode::Char('K') => {
-                self.protocol_type = ProtocolType::Kitty;
-                self.queue_render();
-            }
-            KeyCode::Char('I') => {
-                self.protocol_type = ProtocolType::Iterm2;
-                self.queue_render();
-            }
-            KeyCode::Char('s') => {
+            Action::CycleStretch => {
                 self.stretch = match self.stretch {
                     StretchFunction::Linear => StretchFunction::Logarithmic,
                     StretchFunction::Logarithmic => StretchFunction::Asinh,
@@ -224,11 +241,11 @@ impl App {
                 };
                 self.queue_render();
             }
-            KeyCode::Char('c') => {
+            Action::CycleColormap => {
                 self.colormap = self.colormap.cycle();
                 self.queue_render();
             }
-            KeyCode::Char('z') => {
+            Action::CycleCutMode => {
                 self.cut_mode = match self.cut_mode {
                     CutMode::MinMax => CutMode::ZScale,
                     CutMode::ZScale => CutMode::Custom,
@@ -236,110 +253,105 @@ impl App {
                 };
                 self.apply_cut_mode();
             }
-            KeyCode::Char('w') => {
+            Action::OpenSummary => {
                 self.input_mode = InputMode::Summary;
             }
-            KeyCode::Char('e') => {
+            Action::OpenExtensionPicker => {
                 self.input_mode = InputMode::SelectingExtension {
-                    selected: self.fits.current_extension,
+                    state: ListState::default().with_selected(Some(self.fits.current_extension)),
                 };
             }
-            KeyCode::Char('m') => {
+            Action::OpenManualCut => {
                 self.input_mode = InputMode::EditingBlackPoint;
                 self.input_buffer = self.black_point.to_string();
             }
-            KeyCode::Char('+') | KeyCode::Char('i') => {
+            Action::OpenHelp => {
+                self.input_mode = InputMode::Help { scroll: 0 };
+            }
+            Action::ZoomIn => {
                 self.zoom *= 1.5;
                 self.queue_render();
             }
-            KeyCode::Char('-') | KeyCode::Char('o') => {
+            Action::ZoomOut => {
                 self.zoom /= 1.5;
                 if self.zoom < 1.0 {
                     self.zoom = 1.0;
                 }
                 self.queue_render();
             }
-            KeyCode::Char('r') => {
+            Action::ResetView => {
                 self.zoom = 1.0;
                 self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
                 self.queue_render();
             }
-            KeyCode::Char('R') => {
+            Action::ForceRedraw => {
                 self.clear_screen_next_frame = true;
                 self.queue_render();
             }
-            KeyCode::Char('h') => {
-                self.input_mode = InputMode::Help { scroll: 0 };
-            }
-            KeyCode::Left => {
-                let pan = self.fits.width as f64 / self.zoom * 0.5;
-                self.center.0 -= pan.max(1.0);
+            Action::Pan(dir) => {
+                match dir {
+                    PanDirection::Left => {
+                        let pan = self.fits.width as f64 / self.zoom * 0.5;
+                        self.center.0 -= pan.max(1.0);
+                    }
+                    PanDirection::Right => {
+                        let pan = self.fits.width as f64 / self.zoom * 0.5;
+                        self.center.0 += pan.max(1.0);
+                    }
+                    PanDirection::Up => {
+                        let pan = self.fits.height as f64 / self.zoom * 0.5;
+                        self.center.1 -= pan.max(1.0);
+                    }
+                    PanDirection::Down => {
+                        let pan = self.fits.height as f64 / self.zoom * 0.5;
+                        self.center.1 += pan.max(1.0);
+                    }
+                }
                 self.queue_render();
             }
-            KeyCode::Right | KeyCode::Char('l') => {
-                let pan = self.fits.width as f64 / self.zoom * 0.5;
-                self.center.0 += pan.max(1.0);
-                self.queue_render();
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                let pan = self.fits.height as f64 / self.zoom * 0.5;
-                self.center.1 -= pan.max(1.0);
-                self.queue_render();
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let pan = self.fits.height as f64 / self.zoom * 0.5;
-                self.center.1 += pan.max(1.0);
-                self.queue_render();
-            }
-            _ => {}
         }
     }
 
     fn handle_extension_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('e') => {
-                self.input_mode = InputMode::Normal;
-                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
-                    self.clear_screen_next_frame = true;
-                }
-                // Important: Need to queue a render so ratatui-image gets a chance
-                // to explicitly redraw its background after the popup closes.
-                self.queue_render();
+                self.close_mode();
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if let InputMode::SelectingExtension { selected } = &mut self.input_mode {
-                    if *selected > 0 {
-                        *selected -= 1;
-                    }
+                if let InputMode::SelectingExtension { state } = &mut self.input_mode {
+                    let i = state.selected().unwrap_or(0);
+                    state.select(Some(i.saturating_sub(1)));
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if let InputMode::SelectingExtension { selected } = &mut self.input_mode {
-                    if *selected + 1 < self.fits.extensions.len() {
-                        *selected += 1;
-                    }
+                let last = self.fits.extensions.len().saturating_sub(1);
+                if let InputMode::SelectingExtension { state } = &mut self.input_mode {
+                    let i = state.selected().unwrap_or(0);
+                    state.select(Some((i + 1).min(last)));
                 }
             }
             KeyCode::Enter => {
-                if let InputMode::SelectingExtension { selected } = self.input_mode {
-                    // Check if it's an image
-                    if let Some(ext_info) = self.fits.extensions.get(selected) {
-                        if ext_info.is_image {
-                            // Try to load new extension
-                            if let Ok(new_fits) = crate::fits::load_fits(&self.fits.file_path, Some(&ext_info.index.to_string())) {
-                                self.fits = std::sync::Arc::new(new_fits);
-                                self.zoom = 1.0;
-                                self.center = (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
-                                self.apply_cut_mode(); // this queues render implicitly but we need queue_render_with_fits
-                                self.queue_render_with_fits();
-                            }
+                let selected = match &self.input_mode {
+                    InputMode::SelectingExtension { state } => state.selected().unwrap_or(0),
+                    _ => return,
+                };
+                let ext_info = self.fits.extensions.get(selected).cloned();
+                if let Some(ext_info) = ext_info {
+                    if ext_info.is_image {
+                        if let Ok(new_fits) = crate::fits::load_fits(
+                            &self.fits.file_path,
+                            Some(&ext_info.index.to_string()),
+                        ) {
+                            self.fits = Arc::new(new_fits);
+                            self.zoom = 1.0;
+                            self.center =
+                                (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
+                            self.compute_cuts();
+                            self.queue_render_with_fits();
                         }
                     }
-                    self.input_mode = InputMode::Normal;
-                    if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
-                        self.clear_screen_next_frame = true;
-                    }
                 }
+                self.close_mode();
             }
             _ => {}
         }
@@ -348,48 +360,23 @@ impl App {
     fn handle_summary_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
-                self.input_mode = InputMode::Normal;
-                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
-                    self.clear_screen_next_frame = true;
+                self.close_mode();
+            }
+            // Allow image adjustments while the summary window is open.
+            _ => {
+                if let Some(binding) = keymap::lookup(key) {
+                    if binding.global {
+                        self.dispatch(binding.action);
+                    }
                 }
-                self.queue_render();
             }
-            // Allow state changes while in summary window
-            KeyCode::Char('p')
-            | KeyCode::Char('H')
-            | KeyCode::Char('S')
-            | KeyCode::Char('K')
-            | KeyCode::Char('I')
-            | KeyCode::Char('s')
-            | KeyCode::Char('c')
-            | KeyCode::Char('z')
-            | KeyCode::Char('+')
-            | KeyCode::Char('-')
-            | KeyCode::Char('i')
-            | KeyCode::Char('o')
-            | KeyCode::Char('r')
-            | KeyCode::Char('R')
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Char('j')
-            | KeyCode::Char('k')
-            | KeyCode::Char('l') => {
-                self.handle_normal_key(key);
-            }
-            _ => {}
         }
     }
 
     fn handle_help_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
-                self.input_mode = InputMode::Normal;
-                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
-                    self.clear_screen_next_frame = true;
-                }
-                self.queue_render();
+                self.close_mode();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if let InputMode::Help { scroll } = &mut self.input_mode {
@@ -405,48 +392,41 @@ impl App {
         }
     }
 
+    /// Apply the current input buffer to whichever cut point is being edited.
+    fn apply_input_buffer(&mut self) -> bool {
+        if let Ok(val) = self.input_buffer.parse::<f32>() {
+            match self.input_mode {
+                InputMode::EditingBlackPoint => {
+                    self.black_point = val;
+                    self.custom_black_point = val;
+                }
+                InputMode::EditingWhitePoint => {
+                    self.white_point = val;
+                    self.custom_white_point = val;
+                }
+                _ => {}
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if let Ok(val) = self.input_buffer.parse::<f32>() {
-                    match self.input_mode {
-                        InputMode::EditingBlackPoint => {
-                            self.black_point = val;
-                            self.custom_black_point = val;
-                        }
-                        InputMode::EditingWhitePoint => {
-                            self.white_point = val;
-                            self.custom_white_point = val;
-                        }
-                        _ => {}
-                    }
+                if self.apply_input_buffer() {
                     self.cut_mode = CutMode::Custom;
                     self.queue_render();
                 }
             }
             KeyCode::Esc | KeyCode::Char('q') => {
-                self.input_mode = InputMode::Normal;
-                if self.protocol_type == ratatui_image::picker::ProtocolType::Sixel && self.sixel_clear_workaround {
-                    self.clear_screen_next_frame = true;
-                }
-                self.queue_render();
+                self.close_mode();
             }
             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
                 // Switch between fields, tentatively apply current input if valid
-                if let Ok(val) = self.input_buffer.parse::<f32>() {
-                    match self.input_mode {
-                        InputMode::EditingBlackPoint => {
-                            self.black_point = val;
-                            self.custom_black_point = val;
-                        }
-                        InputMode::EditingWhitePoint => {
-                            self.white_point = val;
-                            self.custom_white_point = val;
-                        }
-                        _ => {}
-                    }
-                }
-                if self.input_mode == InputMode::EditingBlackPoint {
+                self.apply_input_buffer();
+                if matches!(self.input_mode, InputMode::EditingBlackPoint) {
                     self.input_mode = InputMode::EditingWhitePoint;
                     self.input_buffer = self.white_point.to_string();
                 } else {

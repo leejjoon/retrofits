@@ -59,3 +59,130 @@ fn test_quit_key() {
     app.handle_key(quit_event);
     assert!(!app.running);
 }
+
+fn key(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }
+}
+
+fn test_app() -> App {
+    let fits_image = fits::load_fits(&example_fits_path(), None).unwrap();
+    let mut picker = Picker::halfblocks();
+    App::new(
+        std::sync::Arc::new(fits_image),
+        &mut picker,
+        "test.fits".to_string(),
+        ratatui_image::picker::ProtocolType::Halfblocks,
+        true,
+    )
+    .unwrap()
+}
+
+#[test]
+fn test_popup_open_close_cycles() {
+    use crossterm::event::KeyCode;
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+
+    // Each (open key, close key) pair must round-trip back to Normal mode
+    // without quitting the app.
+    for (open, close) in [
+        (KeyCode::Char('h'), KeyCode::Esc),
+        (KeyCode::Char('w'), KeyCode::Char('w')),
+        (KeyCode::Char('e'), KeyCode::Char('q')),
+        (KeyCode::Char('m'), KeyCode::Esc),
+    ] {
+        app.handle_key(key(open));
+        assert!(
+            !matches!(app.input_mode, InputMode::Normal),
+            "{:?} should open a popup",
+            open
+        );
+        app.handle_key(key(close));
+        assert!(
+            matches!(app.input_mode, InputMode::Normal),
+            "{:?} should close the popup",
+            close
+        );
+        assert!(app.running, "closing a popup must not quit the app");
+    }
+}
+
+#[test]
+fn test_keymap_dispatch_matches_keys() {
+    use crossterm::event::KeyCode;
+    use retrofits::keymap::{lookup, Action};
+
+    // Every key documented in the keymap must resolve to its action.
+    assert_eq!(lookup(key(KeyCode::Char('q'))).unwrap().action, Action::Quit);
+    assert_eq!(
+        lookup(key(KeyCode::Char('s'))).unwrap().action,
+        Action::CycleStretch
+    );
+    assert!(lookup(key(KeyCode::Char('x'))).is_none());
+
+    // Dispatch through the App: 's' cycles stretch.
+    let mut app = test_app();
+    let before = app.stretch;
+    app.handle_key(key(KeyCode::Char('s')));
+    assert_ne!(app.stretch, before);
+}
+
+#[test]
+fn test_global_keys_work_in_summary() {
+    use crossterm::event::KeyCode;
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+    app.handle_key(key(KeyCode::Char('w')));
+    assert!(matches!(app.input_mode, InputMode::Summary));
+
+    // Global action (zoom) works while summary is open...
+    let before = app.zoom;
+    app.handle_key(key(KeyCode::Char('+')));
+    assert!(app.zoom > before);
+    assert!(matches!(app.input_mode, InputMode::Summary));
+
+    // ...but non-global actions (open help) are ignored.
+    app.handle_key(key(KeyCode::Char('h')));
+    assert!(matches!(app.input_mode, InputMode::Summary));
+}
+
+#[test]
+fn test_extension_picker_navigation() {
+    use crossterm::event::KeyCode;
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+    let ext_count = app.fits.extensions.len();
+    app.handle_key(key(KeyCode::Char('e')));
+
+    // Navigation clamps to the list bounds.
+    for _ in 0..ext_count + 5 {
+        app.handle_key(key(KeyCode::Down));
+    }
+    if let InputMode::SelectingExtension { state } = &app.input_mode {
+        assert_eq!(state.selected(), Some(ext_count - 1));
+    } else {
+        panic!("expected extension picker mode");
+    }
+    for _ in 0..ext_count + 5 {
+        app.handle_key(key(KeyCode::Up));
+    }
+    if let InputMode::SelectingExtension { state } = &app.input_mode {
+        assert_eq!(state.selected(), Some(0));
+    } else {
+        panic!("expected extension picker mode");
+    }
+
+    // Enter loads (or no-ops on non-image) and returns to Normal.
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.input_mode, InputMode::Normal));
+    assert!(app.running);
+}
