@@ -90,9 +90,11 @@ fn test_popup_open_close_cycles() {
     // Each (open key, close key) pair must round-trip back to Normal mode
     // without quitting the app.
     for (open, close) in [
-        (KeyCode::Char('h'), KeyCode::Esc),
+        (KeyCode::Char('?'), KeyCode::Esc),
         (KeyCode::Char('w'), KeyCode::Char('w')),
         (KeyCode::Char('e'), KeyCode::Char('q')),
+        (KeyCode::Char('v'), KeyCode::Char('q')),
+        (KeyCode::Char('P'), KeyCode::Char('P')),
         (KeyCode::Char('m'), KeyCode::Esc),
     ] {
         app.handle_key(key(open));
@@ -182,4 +184,70 @@ fn test_extension_picker_navigation() {
     app.handle_key(key(KeyCode::Enter));
     assert!(matches!(app.input_mode, InputMode::Normal));
     assert!(app.running);
+}
+
+#[test]
+fn test_vim_keys_and_esc_behavior() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+
+    // Esc must NOT quit from normal mode; q must.
+    app.handle_key(key(KeyCode::Esc));
+    assert!(app.running, "Esc must not quit");
+    assert!(matches!(app.input_mode, InputMode::Normal));
+
+    // h pans left (fine), H pans left coarse (4x the fine step).
+    let start = app.center.0;
+    app.handle_key(key(KeyCode::Char('h')));
+    let fine = start - app.center.0;
+    assert!(fine > 0.0, "h must pan left");
+    let mid = app.center.0;
+    let mut shift_h = key(KeyCode::Char('H'));
+    shift_h.modifiers = KeyModifiers::SHIFT;
+    app.handle_key(shift_h);
+    let coarse = mid - app.center.0;
+    assert!((coarse - 4.0 * fine).abs() < 1e-6, "H must pan 4x farther");
+
+    // Shift+Left is the same coarse pan.
+    let before = app.center.0;
+    let mut shift_left = key(KeyCode::Left);
+    shift_left.modifiers = KeyModifiers::SHIFT;
+    app.handle_key(shift_left);
+    assert!((before - app.center.0 - coarse).abs() < 1e-6);
+}
+
+#[test]
+fn test_zoom_out_below_one() {
+    use crossterm::event::KeyCode;
+
+    let mut app = test_app();
+    assert_eq!(app.zoom, 1.0);
+    app.handle_key(key(KeyCode::Char('-')));
+    assert!(app.zoom < 1.0, "zoom-out below fit must be allowed");
+    // Repeated zoom-out clamps at MIN_ZOOM.
+    for _ in 0..20 {
+        app.handle_key(key(KeyCode::Char('-')));
+    }
+    assert_eq!(app.zoom, retrofits::app::MIN_ZOOM);
+    // Reset restores 1.0.
+    app.handle_key(key(KeyCode::Char('r')));
+    assert_eq!(app.zoom, 1.0);
+}
+
+#[test]
+fn test_protocol_picker() {
+    use crossterm::event::KeyCode;
+    use ratatui_image::picker::ProtocolType;
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+    app.handle_key(key(KeyCode::Char('P')));
+    assert!(matches!(app.input_mode, InputMode::SelectingProtocol { .. }));
+    // Move from Halfblocks (0) to Sixel (1) and apply.
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.input_mode, InputMode::Normal));
+    assert_eq!(app.protocol_type, ProtocolType::Sixel);
 }

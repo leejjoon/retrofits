@@ -4,7 +4,7 @@
 //! keybindings: `App::handle_normal_key` dispatches through it and the help
 //! window is generated from it, so the two can never drift apart.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui_image::picker::ProtocolType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub enum PanDirection {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     Quit,
-    Pan(PanDirection),
+    Pan { dir: PanDirection, coarse: bool },
     ZoomIn,
     ZoomOut,
     ResetView,
@@ -33,11 +33,15 @@ pub enum Action {
     OpenHeader,
     OpenHelp,
     CycleProtocol,
+    OpenProtocolPicker,
     SetProtocol(ProtocolType),
 }
 
 pub struct Binding {
     pub keys: &'static [KeyCode],
+    /// Required modifiers. For `Char` keys, SHIFT is ignored during lookup
+    /// (an uppercase char already implies it).
+    pub mods: KeyModifiers,
     pub action: Action,
     pub category: &'static str,
     pub help: &'static str,
@@ -47,37 +51,142 @@ pub struct Binding {
 }
 
 pub static KEYMAP: &[Binding] = &[
-    // Navigation
+    // Navigation — vim-style fine pan, Shift/uppercase for coarse pan.
     Binding {
-        keys: &[KeyCode::Left],
-        action: Action::Pan(PanDirection::Left),
+        keys: &[KeyCode::Left, KeyCode::Char('h')],
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Left,
+            coarse: false,
+        },
         category: "Navigation",
         help: "Pan left",
         global: true,
     },
     Binding {
         keys: &[KeyCode::Right, KeyCode::Char('l')],
-        action: Action::Pan(PanDirection::Right),
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Right,
+            coarse: false,
+        },
         category: "Navigation",
         help: "Pan right",
         global: true,
     },
     Binding {
         keys: &[KeyCode::Up, KeyCode::Char('k')],
-        action: Action::Pan(PanDirection::Up),
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Up,
+            coarse: false,
+        },
         category: "Navigation",
         help: "Pan up",
         global: true,
     },
     Binding {
         keys: &[KeyCode::Down, KeyCode::Char('j')],
-        action: Action::Pan(PanDirection::Down),
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Down,
+            coarse: false,
+        },
         category: "Navigation",
         help: "Pan down",
         global: true,
     },
     Binding {
-        keys: &[KeyCode::Char('+'), KeyCode::Char('i')],
+        keys: &[KeyCode::Char('H')],
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Left,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan left (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Left],
+        mods: KeyModifiers::SHIFT,
+        action: Action::Pan {
+            dir: PanDirection::Left,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan left (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Char('L')],
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Right,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan right (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Right],
+        mods: KeyModifiers::SHIFT,
+        action: Action::Pan {
+            dir: PanDirection::Right,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan right (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Char('K')],
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Up,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan up (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Up],
+        mods: KeyModifiers::SHIFT,
+        action: Action::Pan {
+            dir: PanDirection::Up,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan up (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Char('J')],
+        mods: KeyModifiers::NONE,
+        action: Action::Pan {
+            dir: PanDirection::Down,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan down (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Down],
+        mods: KeyModifiers::SHIFT,
+        action: Action::Pan {
+            dir: PanDirection::Down,
+            coarse: true,
+        },
+        category: "Navigation",
+        help: "Pan down (coarse)",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Char('+'), KeyCode::Char('='), KeyCode::Char('i')],
+        mods: KeyModifiers::NONE,
         action: Action::ZoomIn,
         category: "Navigation",
         help: "Zoom in",
@@ -85,13 +194,15 @@ pub static KEYMAP: &[Binding] = &[
     },
     Binding {
         keys: &[KeyCode::Char('-'), KeyCode::Char('o')],
+        mods: KeyModifiers::NONE,
         action: Action::ZoomOut,
         category: "Navigation",
-        help: "Zoom out",
+        help: "Zoom out (below 1x shrinks the image)",
         global: true,
     },
     Binding {
         keys: &[KeyCode::Char('r')],
+        mods: KeyModifiers::NONE,
         action: Action::ResetView,
         category: "Navigation",
         help: "Reset zoom and center",
@@ -100,6 +211,7 @@ pub static KEYMAP: &[Binding] = &[
     // Image controls
     Binding {
         keys: &[KeyCode::Char('s')],
+        mods: KeyModifiers::NONE,
         action: Action::CycleStretch,
         category: "Image Controls",
         help: "Cycle stretch function (Linear, Log, Asinh)",
@@ -107,6 +219,7 @@ pub static KEYMAP: &[Binding] = &[
     },
     Binding {
         keys: &[KeyCode::Char('c')],
+        mods: KeyModifiers::NONE,
         action: Action::CycleColormap,
         category: "Image Controls",
         help: "Cycle colormap",
@@ -114,6 +227,7 @@ pub static KEYMAP: &[Binding] = &[
     },
     Binding {
         keys: &[KeyCode::Char('z')],
+        mods: KeyModifiers::NONE,
         action: Action::CycleCutMode,
         category: "Image Controls",
         help: "Cycle cut mode (MinMax, ZScale, Custom)",
@@ -121,6 +235,7 @@ pub static KEYMAP: &[Binding] = &[
     },
     Binding {
         keys: &[KeyCode::Char('m')],
+        mods: KeyModifiers::NONE,
         action: Action::OpenManualCut,
         category: "Image Controls",
         help: "Set custom cut points (manual)",
@@ -129,6 +244,7 @@ pub static KEYMAP: &[Binding] = &[
     // App controls
     Binding {
         keys: &[KeyCode::Char('e')],
+        mods: KeyModifiers::NONE,
         action: Action::OpenExtensionPicker,
         category: "App Controls",
         help: "Select FITS extension",
@@ -136,79 +252,75 @@ pub static KEYMAP: &[Binding] = &[
     },
     Binding {
         keys: &[KeyCode::Char('v')],
+        mods: KeyModifiers::NONE,
         action: Action::OpenHeader,
         category: "App Controls",
         help: "View FITS header (searchable with /)",
         global: false,
     },
     Binding {
-        keys: &[KeyCode::Char('p')],
-        action: Action::CycleProtocol,
-        category: "App Controls",
-        help: "Cycle image protocol (Halfblocks, Sixel, Kitty, iTerm2)",
-        global: true,
-    },
-    Binding {
-        keys: &[KeyCode::Char('H')],
-        action: Action::SetProtocol(ProtocolType::Halfblocks),
-        category: "App Controls",
-        help: "Switch to Halfblocks protocol",
-        global: true,
-    },
-    Binding {
-        keys: &[KeyCode::Char('S')],
-        action: Action::SetProtocol(ProtocolType::Sixel),
-        category: "App Controls",
-        help: "Switch to Sixel protocol",
-        global: true,
-    },
-    Binding {
-        keys: &[KeyCode::Char('K')],
-        action: Action::SetProtocol(ProtocolType::Kitty),
-        category: "App Controls",
-        help: "Switch to Kitty protocol",
-        global: true,
-    },
-    Binding {
-        keys: &[KeyCode::Char('I')],
-        action: Action::SetProtocol(ProtocolType::Iterm2),
-        category: "App Controls",
-        help: "Switch to iTerm2 protocol",
-        global: true,
-    },
-    Binding {
         keys: &[KeyCode::Char('w')],
+        mods: KeyModifiers::NONE,
         action: Action::OpenSummary,
         category: "App Controls",
         help: "Toggle summary window",
         global: false,
     },
     Binding {
-        keys: &[KeyCode::Char('h')],
+        keys: &[KeyCode::Char('p')],
+        mods: KeyModifiers::NONE,
+        action: Action::CycleProtocol,
+        category: "App Controls",
+        help: "Cycle image protocol",
+        global: true,
+    },
+    Binding {
+        keys: &[KeyCode::Char('P')],
+        mods: KeyModifiers::NONE,
+        action: Action::OpenProtocolPicker,
+        category: "App Controls",
+        help: "Select image protocol from a list",
+        global: false,
+    },
+    Binding {
+        keys: &[KeyCode::Char('?')],
+        mods: KeyModifiers::NONE,
         action: Action::OpenHelp,
         category: "App Controls",
-        help: "Toggle help window",
+        help: "Show help",
         global: false,
     },
     Binding {
         keys: &[KeyCode::Char('R')],
+        mods: KeyModifiers::NONE,
         action: Action::ForceRedraw,
         category: "App Controls",
         help: "Force clear and redraw the screen",
         global: true,
     },
     Binding {
-        keys: &[KeyCode::Char('q'), KeyCode::Esc],
+        keys: &[KeyCode::Char('q')],
+        mods: KeyModifiers::NONE,
         action: Action::Quit,
         category: "App Controls",
-        help: "Quit application / Close popups",
+        help: "Quit application",
         global: false,
     },
 ];
 
 /// Find the binding for a key event, if any.
+///
+/// For `Char` keys the SHIFT modifier is stripped before comparison since an
+/// uppercase character already encodes it; for other keys (arrows etc.) the
+/// modifiers must match exactly, which is what allows Shift+Arrow bindings.
 pub fn lookup(key: KeyEvent) -> Option<&'static Binding> {
-    KEYMAP.iter().find(|b| b.keys.contains(&key.code))
+    let ev_mods = match key.code {
+        KeyCode::Char(_) => key.modifiers - KeyModifiers::SHIFT,
+        _ => key.modifiers,
+    };
+    KEYMAP
+        .iter()
+        .find(|b| b.keys.contains(&key.code) && ev_mods == b.mods)
 }
 
 /// Human-readable name for a key, used in the generated help window.
@@ -225,4 +337,20 @@ pub fn key_name(key: &KeyCode) -> String {
         KeyCode::Tab => "Tab".to_string(),
         other => format!("{:?}", other),
     }
+}
+
+/// All key names for a binding, including a modifier prefix.
+pub fn binding_keys(binding: &Binding) -> Vec<String> {
+    let prefix = if binding.mods.contains(KeyModifiers::SHIFT) {
+        "Shift+"
+    } else if binding.mods.contains(KeyModifiers::CONTROL) {
+        "Ctrl+"
+    } else {
+        ""
+    };
+    binding
+        .keys
+        .iter()
+        .map(|k| format!("{}{}", prefix, key_name(k)))
+        .collect()
 }

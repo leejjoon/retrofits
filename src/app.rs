@@ -82,6 +82,17 @@ pub fn protocol_name(p: ProtocolType) -> &'static str {
     }
 }
 
+/// All selectable protocols, in picker order.
+pub const PROTOCOLS: [ProtocolType; 4] = [
+    ProtocolType::Halfblocks,
+    ProtocolType::Sixel,
+    ProtocolType::Kitty,
+    ProtocolType::Iterm2,
+];
+
+/// Minimum zoom factor: 0.1x (image shrinks to 10% of the fit size).
+pub const MIN_ZOOM: f64 = 0.1;
+
 /// less-style incremental search state for the header viewer.
 #[derive(Debug, Default)]
 pub struct HeaderSearch {
@@ -105,6 +116,7 @@ pub enum InputMode {
     Help { scroll: u16 },
     HeaderView { scroll: usize, search: HeaderSearch },
     SelectingExtension { state: ListState },
+    SelectingProtocol { state: ListState },
 }
 
 pub struct App {
@@ -213,34 +225,30 @@ impl App {
         self.queue_render();
     }
 
-    pub fn queue_render(&mut self) {
-        let req = RenderRequest {
+    fn render_request(&self, new_fits: Option<Arc<FitsImage>>) -> RenderRequest {
+        RenderRequest {
             stretch: self.stretch,
             colormap: self.colormap,
             black_point: self.black_point,
             white_point: self.white_point,
-            zoom: self.zoom,
+            // Below 1x the whole image is visible: the ui draws it into a
+            // rect shrunk by `zoom` and term_size reflects that rect, so the
+            // renderer itself works at fit scale.
+            zoom: self.zoom.max(1.0),
             center: self.center,
             term_size: self.term_size,
             protocol_type: self.protocol_type,
-            new_fits: None,
-        };
-        self.render_thread.request(req);
+            new_fits,
+        }
+    }
+
+    pub fn queue_render(&mut self) {
+        self.render_thread.request(self.render_request(None));
     }
 
     pub fn queue_render_with_fits(&mut self) {
-        let req = RenderRequest {
-            stretch: self.stretch,
-            colormap: self.colormap,
-            black_point: self.black_point,
-            white_point: self.white_point,
-            zoom: self.zoom,
-            center: self.center,
-            term_size: self.term_size,
-            protocol_type: self.protocol_type,
-            new_fits: Some(self.fits.clone()),
-        };
-        self.render_thread.request(req);
+        self.render_thread
+            .request(self.render_request(Some(self.fits.clone())));
     }
 
     pub fn try_update_protocol(&mut self) -> bool {
@@ -300,12 +308,17 @@ impl App {
             InputMode::Help { .. } => self.handle_help_key(key),
             InputMode::HeaderView { .. } => self.handle_header_key(key),
             InputMode::SelectingExtension { .. } => self.handle_extension_key(key),
+            InputMode::SelectingProtocol { .. } => self.handle_protocol_key(key),
         }
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) {
         if let Some(binding) = keymap::lookup(key) {
             self.dispatch(binding.action);
+        } else if key.code == KeyCode::Esc {
+            // Esc deliberately does not quit (a common TUI footgun);
+            // remind the user of the real quit key.
+            self.notify(Severity::Info, "Press q to quit");
         }
     }
 
@@ -380,9 +393,9 @@ impl App {
             }
             Action::ZoomOut => {
                 self.zoom /= 1.5;
-                if self.zoom < 1.0 {
-                    self.zoom = 1.0;
-                    self.notify(Severity::Info, "Already at minimum zoom (fit)");
+                if self.zoom < MIN_ZOOM {
+                    self.zoom = MIN_ZOOM;
+                    self.notify(Severity::Info, "Already at minimum zoom");
                 }
                 self.queue_render();
             }
@@ -395,26 +408,38 @@ impl App {
                 self.clear_screen_next_frame = true;
                 self.queue_render();
             }
-            Action::Pan(dir) => {
+            Action::Pan { dir, coarse } => {
+                // Fine pan moves 1/8 of the visible field, coarse 1/2.
+                let factor = if coarse { 0.5 } else { 0.125 };
+                let zoom = self.zoom.max(1.0);
                 match dir {
                     PanDirection::Left => {
-                        let pan = self.fits.width as f64 / self.zoom * 0.5;
+                        let pan = self.fits.width as f64 / zoom * factor;
                         self.center.0 -= pan.max(1.0);
                     }
                     PanDirection::Right => {
-                        let pan = self.fits.width as f64 / self.zoom * 0.5;
+                        let pan = self.fits.width as f64 / zoom * factor;
                         self.center.0 += pan.max(1.0);
                     }
                     PanDirection::Up => {
-                        let pan = self.fits.height as f64 / self.zoom * 0.5;
+                        let pan = self.fits.height as f64 / zoom * factor;
                         self.center.1 -= pan.max(1.0);
                     }
                     PanDirection::Down => {
-                        let pan = self.fits.height as f64 / self.zoom * 0.5;
+                        let pan = self.fits.height as f64 / zoom * factor;
                         self.center.1 += pan.max(1.0);
                     }
                 }
                 self.queue_render();
+            }
+            Action::OpenProtocolPicker => {
+                let current = PROTOCOLS
+                    .iter()
+                    .position(|&p| p == self.protocol_type)
+                    .unwrap_or(0);
+                self.input_mode = InputMode::SelectingProtocol {
+                    state: ListState::default().with_selected(Some(current)),
+                };
             }
         }
     }
@@ -485,6 +510,36 @@ impl App {
         }
     }
 
+    fn handle_protocol_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('P') => {
+                self.close_mode();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let InputMode::SelectingProtocol { state } = &mut self.input_mode {
+                    let i = state.selected().unwrap_or(0);
+                    state.select(Some(i.saturating_sub(1)));
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let InputMode::SelectingProtocol { state } = &mut self.input_mode {
+                    let i = state.selected().unwrap_or(0);
+                    state.select(Some((i + 1).min(PROTOCOLS.len() - 1)));
+                }
+            }
+            KeyCode::Enter => {
+                if let InputMode::SelectingProtocol { state } = &self.input_mode {
+                    let selected = state.selected().unwrap_or(0).min(PROTOCOLS.len() - 1);
+                    let p = PROTOCOLS[selected];
+                    self.protocol_type = p;
+                    self.notify(Severity::Info, format!("Protocol: {}", protocol_name(p)));
+                }
+                self.close_mode();
+            }
+            _ => {}
+        }
+    }
+
     fn handle_summary_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('w') => {
@@ -503,7 +558,7 @@ impl App {
 
     fn handle_help_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('h') => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
                 self.close_mode();
             }
             KeyCode::Up | KeyCode::Char('k') => {

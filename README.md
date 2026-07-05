@@ -48,17 +48,22 @@ retrofits --protocol sixel image.fits
 
 ## Keyboard Shortcuts
 
+Press `?` inside the app for the always-up-to-date list (it is generated from
+the actual keymap).
+
 ### General
-- `q`, `Esc`: Quit application
-- `h`: Show help window
-- `w`: Show FITS header summary
+- `q`: Quit application (`Esc` closes panels/pages, never quits)
+- `?`: Show help window
+- `v`: View the full FITS header (scroll with `j/k`, search with `/`, `n`/`N` next/prev match)
+- `w`: Show viewport summary panel
 - `e`: Select FITS extension (for multi-extension files)
 - `R`: Force full screen redraw (useful for clearing artifacts)
 
 ### Navigation
-- `Arrow Keys` or `h/j/k/l`: Pan image
-- `+`, `i`: Zoom in
-- `-`, `o`: Zoom out
+- `Arrow Keys` or `h/j/k/l`: Pan image (fine, 1/8 of the view)
+- `Shift+Arrows` or `H/J/K/L`: Pan image (coarse, 1/2 of the view)
+- `+`, `=`, `i`: Zoom in
+- `-`, `o`: Zoom out (below 1x the image shrinks inside the window)
 - `r`: Reset zoom and pan
 
 ### Image Adjustment
@@ -69,10 +74,7 @@ retrofits --protocol sixel image.fits
 
 ### Protocol Switching
 - `p`: Cycle through rendering protocols
-- `H`: Switch to Halfblocks
-- `S`: Switch to Sixel
-- `K`: Switch to Kitty
-- `I`: Switch to iTerm2
+- `P`: Pick a protocol from a list
 
 ### Rendering Artifacts
 

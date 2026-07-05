@@ -42,7 +42,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     let (image_area, panel_area) = match app.input_mode {
-        InputMode::Summary | InputMode::SelectingExtension { .. } => {
+        InputMode::Summary
+        | InputMode::SelectingExtension { .. }
+        | InputMode::SelectingProtocol { .. } => {
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Min(0), Constraint::Length(SIDE_PANEL_WIDTH)])
@@ -59,8 +61,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         _ => (main, None),
     };
 
+    // Below 1x zoom, draw the image into a centered sub-rect shrunk by the
+    // zoom factor; the render request sees the sub-rect size and renders the
+    // whole image at fit scale into it.
+    let image_area = if app.zoom < 1.0 {
+        let w = ((image_area.width as f64 * app.zoom).round() as u16).max(1);
+        let h = ((image_area.height as f64 * app.zoom).round() as u16).max(1);
+        Rect {
+            x: image_area.x + (image_area.width - w) / 2,
+            y: image_area.y + (image_area.height - h) / 2,
+            width: w,
+            height: h,
+        }
+    } else {
+        image_area
+    };
+
     // Update term size and queue re-render when the image rect changes
-    // (terminal resize or a panel opening/closing).
+    // (terminal resize, a panel opening/closing, or zoom-out shrink).
     let new_term_size = (image_area.width, image_area.height);
     if app.term_size != new_term_size {
         app.term_size = new_term_size;
@@ -76,6 +94,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_summary_panel(f, app, panel);
         } else if matches!(app.input_mode, InputMode::SelectingExtension { .. }) {
             draw_extension_panel(f, app, panel);
+        } else if matches!(app.input_mode, InputMode::SelectingProtocol { .. }) {
+            draw_protocol_panel(f, app, panel);
         } else {
             draw_cut_panel(f, app, panel);
         }
@@ -100,10 +120,64 @@ fn draw_help_page(f: &mut Frame, area: Rect, scroll: u16) {
     f.render_widget(paragraph, rows[0]);
 
     let footer = Paragraph::new(Span::styled(
-        " j/k:scroll  Esc/q/h:close ",
+        " j/k:scroll  Esc/q/?:close ",
         Style::default().fg(Color::DarkGray),
     ));
     f.render_widget(footer, rows[1]);
+}
+
+/// Side panel listing the available graphics protocols.
+fn draw_protocol_panel(f: &mut Frame, app: &mut App, area: Rect) {
+    use crate::app::{protocol_name, PROTOCOLS};
+
+    let block = Block::default()
+        .title(" Protocol ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let list_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    let items: Vec<ListItem> = PROTOCOLS
+        .iter()
+        .map(|&p| {
+            let mut label = format!(
+                "{} {}",
+                if p == app.protocol_type { "\u{25cf}" } else { " " },
+                protocol_name(p)
+            );
+            if p == app.guessed_protocol {
+                label.push_str(" (detected)");
+            }
+            let style = if p == app.protocol_type {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    if let InputMode::SelectingProtocol { state } = &mut app.input_mode {
+        f.render_stateful_widget(list, list_layout[0], state);
+    }
+
+    let hint = Paragraph::new(Span::styled(
+        " Enter:apply  Esc/q/P:close ",
+        Style::default().fg(Color::DarkGray),
+    ));
+    f.render_widget(hint, list_layout[1]);
 }
 
 /// Byte ranges of case-insensitive occurrences of `query_lower` in `text`.
@@ -536,7 +610,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let proto_warn = app.protocol_type != ratatui_image::picker::ProtocolType::Halfblocks
         && app.protocol_type != app.guessed_protocol;
     let right = format!(
-        " {}{}  h:help q:quit ",
+        " {}{}  ?:help q:quit ",
         protocol_name(app.protocol_type),
         if proto_warn { "!" } else { "" }
     );
@@ -569,11 +643,15 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Build the help window content from the keymap, grouped by category, so
-/// the displayed shortcuts always match the actual bindings.
+/// the displayed shortcuts always match the actual bindings. Consecutive
+/// bindings for the same action (e.g. `H` and `Shift+Left`) share one line.
 fn help_lines() -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut last_category = "";
-    for binding in keymap::KEYMAP {
+    let mut i = 0;
+    let map = keymap::KEYMAP;
+    while i < map.len() {
+        let binding = &map[i];
         if binding.category != last_category {
             if !last_category.is_empty() {
                 lines.push(Line::from(""));
@@ -584,13 +662,17 @@ fn help_lines() -> Vec<Line<'static>> {
             )));
             last_category = binding.category;
         }
-        let keys = binding
-            .keys
-            .iter()
-            .map(keymap::key_name)
-            .collect::<Vec<_>>()
-            .join(" / ");
-        lines.push(Line::from(format!("  {:<18} : {}", keys, binding.help)));
+        let mut keys = keymap::binding_keys(binding);
+        while i + 1 < map.len() && map[i + 1].action == binding.action {
+            i += 1;
+            keys.extend(keymap::binding_keys(&map[i]));
+        }
+        lines.push(Line::from(format!(
+            "  {:<18} : {}",
+            keys.join(" / "),
+            binding.help
+        )));
+        i += 1;
     }
     lines
 }
