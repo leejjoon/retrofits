@@ -27,10 +27,6 @@ struct Cli {
     /// FITS extension to load (index or EXTNAME).
     #[arg(short, long)]
     ext: Option<String>,
-
-    /// Disable the workaround that clears the screen when a popup is closed in Sixel protocol.
-    #[arg(long, env = "RETROFITS_DISABLE_SIXEL_CLEAR")]
-    disable_sixel_clear: bool,
 }
 
 fn main() -> Result<()> {
@@ -93,7 +89,6 @@ fn main() -> Result<()> {
         &mut picker,
         filename,
         guessed_protocol,
-        !cli.disable_sixel_clear,
     )?;
 
     // Main event loop

@@ -18,7 +18,6 @@ fn test_app_creation() {
         &mut picker,
         "test.fits".to_string(),
         guessed,
-        true,
     );
 
     assert!(app.is_ok());
@@ -43,7 +42,6 @@ fn test_quit_key() {
         &mut picker,
         "test.fits".to_string(),
         guessed,
-        true,
     )
     .unwrap();
 
@@ -78,7 +76,6 @@ fn test_app() -> App {
         &mut picker,
         "test.fits".to_string(),
         ratatui_image::picker::ProtocolType::Halfblocks,
-        true,
     )
     .unwrap()
 }

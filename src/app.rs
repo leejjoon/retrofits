@@ -85,8 +85,10 @@ pub struct App {
     pub guessed_protocol: ProtocolType,
     pub render_thread: RenderThread,
     pub running: bool,
+    /// One-shot flag: force a full terminal clear before the next draw.
+    /// Set by the `R` (force redraw) key as an escape hatch for any
+    /// terminal-emulator rendering artifact.
     pub clear_screen_next_frame: bool,
-    pub sixel_clear_workaround: bool,
     pub message: Option<StatusMessage>,
 }
 
@@ -96,7 +98,6 @@ impl App {
         picker: &mut Picker,
         filename: String,
         guessed_protocol: ProtocolType,
-        sixel_clear_workaround: bool,
     ) -> anyhow::Result<Self> {
         let (black_point, white_point) = auto_stretch_params(fits.data.view());
         let stretch = StretchFunction::Asinh;
@@ -133,7 +134,6 @@ impl App {
             render_thread,
             running: true,
             clear_screen_next_frame: false,
-            sixel_clear_workaround,
             message: None,
         };
 
@@ -239,15 +239,11 @@ impl App {
 
     /// Leave the current popup/mode and return to [`InputMode::Normal`].
     ///
-    /// Centralizes the redraw handling every popup close needs: ratatui-image
-    /// must repaint the cells the popup blanked, so a render is queued; under
-    /// Sixel the encoded image may be cached as already-drawn, so the screen
-    /// is additionally cleared (see DEVELOP.md).
+    /// Panels never overlay the image (see `ui::draw`), so no protocol
+    /// workarounds are needed here; the queued render covers the image-rect
+    /// growth when a panel closes.
     pub fn close_mode(&mut self) {
         self.input_mode = InputMode::Normal;
-        if self.protocol_type == ProtocolType::Sixel && self.sixel_clear_workaround {
-            self.clear_screen_next_frame = true;
-        }
         self.queue_render();
     }
 

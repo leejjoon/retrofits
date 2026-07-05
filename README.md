@@ -74,14 +74,9 @@ retrofits --protocol sixel image.fits
 - `K`: Switch to Kitty
 - `I`: Switch to iTerm2
 
-### Sixel Artifact Workaround
+### Rendering Artifacts
 
-When using the Sixel protocol, opening and closing UI popups (like the Help or Summary windows) may leave lingering graphical artifacts. By default, RetroFITS forces a full screen clear to fix this caching issue on Sixel.
-
-If your terminal correctly clears the Sixel image under the popup without issues and you experience flickering with this workaround, you can disable it via a flag or environment variable:
-
-```bash
-retrofits --disable-sixel-clear image.fits
-# or via environment variable
-RETROFITS_DISABLE_SIXEL_CLEAR=1 retrofits image.fits
-```
+UI panels (help, summary, extension picker, manual cut) are laid out beside
+the image rather than on top of it, so protocol-level redraw artifacts should
+not occur. If your terminal emulator ever leaves stale graphics on screen,
+press `R` to force a full clear and redraw.
