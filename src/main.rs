@@ -126,6 +126,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             should_draw = true;
         }
 
+        // Expire transient status messages
+        if app.tick_message() {
+            should_draw = true;
+        }
+
         // 2. Poll for terminal events with a timeout
         // This acts as our event loop wait. A shorter timeout makes input feel snappier,
         // while a longer one saves CPU.

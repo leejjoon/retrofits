@@ -40,46 +40,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let image_widget = StatefulImage::default().resize(Resize::Scale(None));
     f.render_stateful_widget(image_widget, chunks[0], &mut app.protocol);
 
-    // Status bar
-    let max_filename_len = 20;
-    let filename_chars: Vec<char> = app.filename.chars().collect();
-    let filename = if filename_chars.len() > max_filename_len {
-        let truncated: String = filename_chars.into_iter().take(max_filename_len - 3).collect();
-        format!("{}...", truncated)
-    } else {
-        app.filename.clone()
-    };
-
-    let proto_str = match app.protocol_type {
-        ratatui_image::picker::ProtocolType::Halfblocks => "Halfblocks",
-        ratatui_image::picker::ProtocolType::Sixel => "Sixel",
-        ratatui_image::picker::ProtocolType::Kitty => "Kitty",
-        ratatui_image::picker::ProtocolType::Iterm2 => "iTerm2",
-    };
-
-    // Stretch symbol
-    let stretch_sym = match app.stretch {
-        crate::stretch::StretchFunction::Linear => "➖",
-        crate::stretch::StretchFunction::Logarithmic => "📈",
-        crate::stretch::StretchFunction::Asinh => "〰️",
-    };
-
-    // Colormap symbol (just generic)
-    let cmap_sym = "🎨";
-
-    // Zoom symbol
-    let zoom_sym = "🔍";
-
-    let status_text = format!(
-        " [{}] {} {:.2}x {} {} | p: {} | z: {} | w: summary | h: help | q: quit ",
-        filename, zoom_sym, app.zoom, stretch_sym, cmap_sym, proto_str, app.cut_mode
-    );
-
-    let status_bar = Paragraph::new(Span::raw(status_text))
-        .style(Style::default().bg(Color::Blue).fg(Color::White))
-        .block(Block::default().borders(Borders::NONE));
-
-    f.render_widget(status_bar, chunks[1]);
+    draw_status_bar(f, app, chunks[1]);
 
     if let InputMode::Help { scroll } = app.input_mode {
         let inner = popup_frame(f, "Help / Keybindings", Color::Cyan, 50, 60);
@@ -117,24 +78,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     "Stretch (s): ",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(match app.stretch {
-                    crate::stretch::StretchFunction::Linear => "Linear",
-                    crate::stretch::StretchFunction::Logarithmic => "Logarithmic",
-                    crate::stretch::StretchFunction::Asinh => "Asinh",
-                }),
+                Span::raw(app.stretch.to_string()),
             ]),
             ratatui::text::Line::from(vec![
                 Span::styled(
                     "Colormap (c): ",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(match app.colormap {
-                    crate::colormap::ColormapName::Grayscale => "Grayscale",
-                    crate::colormap::ColormapName::Viridis => "Viridis",
-                    crate::colormap::ColormapName::Plasma => "Plasma",
-                    crate::colormap::ColormapName::Inferno => "Inferno",
-                    crate::colormap::ColormapName::Magma => "Magma",
-                }),
+                Span::raw(app.colormap.to_string()),
             ]),
             ratatui::text::Line::from(vec![
                 Span::styled(
@@ -153,19 +104,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             ratatui::text::Line::from(""),
         ];
 
-        let guessed_proto_name = match app.guessed_protocol {
-            ratatui_image::picker::ProtocolType::Halfblocks => "Halfblocks",
-            ratatui_image::picker::ProtocolType::Sixel => "Sixel",
-            ratatui_image::picker::ProtocolType::Kitty => "Kitty",
-            ratatui_image::picker::ProtocolType::Iterm2 => "iTerm2",
-        };
-
-        let proto_name = match app.protocol_type {
-            ratatui_image::picker::ProtocolType::Halfblocks => "Halfblocks",
-            ratatui_image::picker::ProtocolType::Sixel => "Sixel",
-            ratatui_image::picker::ProtocolType::Kitty => "Kitty",
-            ratatui_image::picker::ProtocolType::Iterm2 => "iTerm2",
-        };
+        let guessed_proto_name = crate::app::protocol_name(app.guessed_protocol);
+        let proto_name = crate::app::protocol_name(app.protocol_type);
 
         let proto_status = if app.protocol_type != ratatui_image::picker::ProtocolType::Halfblocks
             && app.protocol_type != app.guessed_protocol
@@ -339,6 +279,118 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ));
         f.render_widget(hint, list_layout[1]);
     }
+}
+
+/// Compact float formatting for the status bar: scientific notation for
+/// very large/small magnitudes, fixed-point otherwise.
+fn fmt_cut(v: f32) -> String {
+    let a = v.abs();
+    if a != 0.0 && (a >= 100_000.0 || a < 0.01) {
+        format!("{:.2e}", v)
+    } else {
+        format!("{:.2}", v)
+    }
+}
+
+/// Three-segment status line:
+/// `file [ext] dims │ zoom stretch colormap cut[b,w] │ protocol hints`
+///
+/// While a transient message is live it replaces the middle segment, in a
+/// color matching its severity. Segments are dropped right-to-left when the
+/// terminal is too narrow.
+fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
+    use crate::app::{protocol_name, Severity};
+
+    let base = Style::default().bg(Color::Blue).fg(Color::White);
+
+    // Left segment: filename [ext] dims
+    let max_filename_len = 20;
+    let filename_chars: Vec<char> = app.filename.chars().collect();
+    let filename = if filename_chars.len() > max_filename_len {
+        let truncated: String = filename_chars
+            .into_iter()
+            .take(max_filename_len - 3)
+            .collect();
+        format!("{}...", truncated)
+    } else {
+        app.filename.clone()
+    };
+    let ext_str = if app.fits.extensions.len() > 1 {
+        let ext = &app.fits.extensions[app.fits.current_extension];
+        if ext.name.is_empty() {
+            format!(" [{}]", ext.index)
+        } else {
+            format!(" [{}:{}]", ext.index, ext.name)
+        }
+    } else {
+        String::new()
+    };
+    let left = format!(
+        " {}{} {}\u{d7}{} ",
+        filename, ext_str, app.fits.width, app.fits.height
+    );
+
+    // Middle segment: viewport / display state, or a live message.
+    let (middle, middle_style) = match &app.message {
+        Some(msg) => {
+            let style = match msg.severity {
+                Severity::Info => base.add_modifier(Modifier::BOLD),
+                Severity::Warn => base.fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Severity::Error => Style::default()
+                    .bg(Color::Red)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            };
+            (format!(" {} ", msg.text), style)
+        }
+        None => (
+            format!(
+                " {:.2}x  {}  {}  {}[{},{}] ",
+                app.zoom,
+                app.stretch,
+                app.colormap,
+                app.cut_mode,
+                fmt_cut(app.black_point),
+                fmt_cut(app.white_point)
+            ),
+            base,
+        ),
+    };
+
+    // Right segment: protocol (+ mismatch marker) and key hints.
+    let proto_warn = app.protocol_type != ratatui_image::picker::ProtocolType::Halfblocks
+        && app.protocol_type != app.guessed_protocol;
+    let right = format!(
+        " {}{}  h:help q:quit ",
+        protocol_name(app.protocol_type),
+        if proto_warn { "!" } else { "" }
+    );
+
+    // Assemble, dropping segments right-to-left if the bar is too narrow.
+    let width = area.width as usize;
+    let sep = Span::styled("\u{2502}", base.fg(Color::LightBlue));
+    let mut spans = vec![
+        Span::styled(left.clone(), base),
+        sep.clone(),
+        Span::styled(middle.clone(), middle_style),
+    ];
+    let used = left.chars().count() + 1 + middle.chars().count();
+    if used + 1 + right.chars().count() <= width {
+        spans.push(sep);
+        if proto_warn {
+            let (proto_part, rest) = right.split_at(right.find("  ").unwrap_or(right.len()));
+            spans.push(Span::styled(proto_part.to_string(), base.fg(Color::Yellow)));
+            spans.push(Span::styled(rest.to_string(), base));
+        } else {
+            spans.push(Span::styled(right, base));
+        }
+    } else if used > width {
+        // Too narrow even for left+middle: keep the middle (most dynamic).
+        spans = vec![Span::styled(middle, middle_style)];
+    }
+
+    let status_bar = Paragraph::new(Line::from(spans)).style(base);
+    f.render_widget(status_bar, area);
 }
 
 /// Build the help window content from the keymap, grouped by category, so

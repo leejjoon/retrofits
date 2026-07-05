@@ -29,6 +29,31 @@ impl std::fmt::Display for CutMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Info,
+    Warn,
+    Error,
+}
+
+/// A transient, vim-style status-line message.
+#[derive(Debug)]
+pub struct StatusMessage {
+    pub text: String,
+    pub severity: Severity,
+    pub expires: std::time::Instant,
+}
+
+/// Human-readable protocol name, shared by the status bar and summary.
+pub fn protocol_name(p: ProtocolType) -> &'static str {
+    match p {
+        ProtocolType::Halfblocks => "Halfblocks",
+        ProtocolType::Sixel => "Sixel",
+        ProtocolType::Kitty => "Kitty",
+        ProtocolType::Iterm2 => "iTerm2",
+    }
+}
+
 #[derive(Debug)]
 pub enum InputMode {
     Normal,
@@ -62,6 +87,7 @@ pub struct App {
     pub running: bool,
     pub clear_screen_next_frame: bool,
     pub sixel_clear_workaround: bool,
+    pub message: Option<StatusMessage>,
 }
 
 impl App {
@@ -108,6 +134,7 @@ impl App {
             running: true,
             clear_screen_next_frame: false,
             sixel_clear_workaround,
+            message: None,
         };
 
         app.center = (app.fits.width as f64 / 2.0, app.fits.height as f64 / 2.0);
@@ -182,6 +209,34 @@ impl App {
         }
     }
 
+    /// Show a transient status-line message (vim-style).
+    pub fn notify(&mut self, severity: Severity, text: impl Into<String>) {
+        let duration = match severity {
+            Severity::Info => std::time::Duration::from_millis(2500),
+            Severity::Warn | Severity::Error => std::time::Duration::from_secs(5),
+        };
+        self.message = Some(StatusMessage {
+            text: text.into(),
+            severity,
+            expires: std::time::Instant::now() + duration,
+        });
+    }
+
+    /// Expire the current status message if its time is up. Returns `true`
+    /// if the message was cleared and a redraw is needed.
+    pub fn tick_message(&mut self) -> bool {
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|m| std::time::Instant::now() >= m.expires)
+        {
+            self.message = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Leave the current popup/mode and return to [`InputMode::Normal`].
     ///
     /// Centralizes the redraw handling every popup close needs: ratatui-image
@@ -227,10 +282,15 @@ impl App {
                     ProtocolType::Kitty => ProtocolType::Iterm2,
                     ProtocolType::Iterm2 => ProtocolType::Halfblocks,
                 };
+                self.notify(
+                    Severity::Info,
+                    format!("Protocol: {}", protocol_name(self.protocol_type)),
+                );
                 self.queue_render();
             }
             Action::SetProtocol(p) => {
                 self.protocol_type = p;
+                self.notify(Severity::Info, format!("Protocol: {}", protocol_name(p)));
                 self.queue_render();
             }
             Action::CycleStretch => {
@@ -276,6 +336,7 @@ impl App {
                 self.zoom /= 1.5;
                 if self.zoom < 1.0 {
                     self.zoom = 1.0;
+                    self.notify(Severity::Info, "Already at minimum zoom (fit)");
                 }
                 self.queue_render();
             }
@@ -418,6 +479,11 @@ impl App {
                 if self.apply_input_buffer() {
                     self.cut_mode = CutMode::Custom;
                     self.queue_render();
+                } else {
+                    self.notify(
+                        Severity::Error,
+                        format!("Invalid number: '{}'", self.input_buffer),
+                    );
                 }
             }
             KeyCode::Esc | KeyCode::Char('q') => {

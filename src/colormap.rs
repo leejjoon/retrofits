@@ -26,6 +26,18 @@ impl ColormapName {
     }
 }
 
+impl std::fmt::Display for ColormapName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Grayscale => write!(f, "Grayscale"),
+            Self::Viridis => write!(f, "Viridis"),
+            Self::Plasma => write!(f, "Plasma"),
+            Self::Inferno => write!(f, "Inferno"),
+            Self::Magma => write!(f, "Magma"),
+        }
+    }
+}
+
 /// Applies the selected colormap to the stretched data `[0.0, 1.0]`.
 /// Returns an `RgbaImage` suitable for rendering.
 pub fn apply_colormap(stretched: ArrayView2<f32>, cmap: ColormapName) -> RgbaImage {

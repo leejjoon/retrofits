@@ -10,6 +10,16 @@ pub enum StretchFunction {
     Asinh,
 }
 
+impl std::fmt::Display for StretchFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Linear => write!(f, "Linear"),
+            Self::Logarithmic => write!(f, "Log"),
+            Self::Asinh => write!(f, "Asinh"),
+        }
+    }
+}
+
 /// Applies a non-linear stretch to the input data, mapping values from `[black_point, white_point]`
 /// into the `[0.0, 1.0]` range.
 ///
