@@ -168,10 +168,15 @@ detection, and the event loop.
 
 ## Tests
 
-- Inline `#[cfg(test)]` modules in `fits.rs`, `stretch.rs`, `colormap.rs`.
+- Inline `#[cfg(test)]` modules in `fits.rs`, `stretch.rs`, `colormap.rs`,
+  `app.rs`, `ui.rs`.
 - Integration tests in `tests/`: `pipeline_tests.rs`, `render_tests.rs`,
   `viewport_tests.rs`, `tui_tests.rs`, `zscale_tests.rs`.
 - Run with `cargo test`.
+- **Visual regression** (`tests/visual/run.sh`, not part of `cargo test`):
+  drives real kitty and konsole emulators headlessly under Xvfb and
+  pixel-diffs screenshots to prove panel open/close cycles leave no
+  graphics-protocol artifacts. Requires Xvfb + ImageMagick.
 
 ---
 
