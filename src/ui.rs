@@ -542,7 +542,7 @@ fn draw_cut_panel(f: &mut Frame, app: &App, area: Rect) {
 /// very large/small magnitudes, fixed-point otherwise.
 fn fmt_cut(v: f32) -> String {
     let a = v.abs();
-    if a != 0.0 && (a >= 100_000.0 || a < 0.01) {
+    if a != 0.0 && !(0.01..100_000.0).contains(&a) {
         format!("{:.2e}", v)
     } else {
         format!("{:.2}", v)

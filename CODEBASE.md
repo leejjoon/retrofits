@@ -28,11 +28,13 @@ Array2<f32>  ──►  stretch.rs   Linear / Log / Asinh  →  [0,1]
                   render.rs    crop viewport (zoom/pan), encode via ratatui-image
                       │        (runs on a debounced background thread)
                       ▼
-                  ui.rs        image widget + status bar + popups (ratatui)
+                  ui.rs        image widget + status bar + side/bottom panels
+                               + full-screen pages (ratatui)
 ```
 
-`app.rs` holds all interactive state and routes keyboard input; `main.rs` wires
-up the CLI, terminal, protocol detection, and the event loop.
+`app.rs` holds all interactive state and routes keyboard/mouse input through
+the `keymap.rs` binding table; `main.rs` wires up the CLI, terminal, protocol
+detection, and the event loop.
 
 ---
 
@@ -40,63 +42,100 @@ up the CLI, terminal, protocol detection, and the event loop.
 
 | File | Lines | Responsibility |
 | :--- | ----: | :--- |
-| `main.rs` | 159 | CLI parsing (`clap`), terminal setup, protocol detection/override, 5 ms-poll event loop. |
-| `lib.rs` | 7 | Module declarations (exposes everything for the integration tests). |
-| `app.rs` | 468 | Central `App` state + all keyboard handling and input modes. |
-| `fits.rs` | 466 | FITS parsing via `fitsrs`; extracts pixel data into `Array2<f32>`. |
-| `render.rs` | 139 | Background `RenderThread`: viewport crop, stretch+colormap, encode. |
-| `ui.rs` | 385 | ratatui rendering: image area, status bar, popups. |
-| `stretch.rs` | 125 | Linear / Logarithmic / Asinh stretch (rayon-parallel). |
-| `colormap.rs` | 124 | Maps `[0,1]` → RGBA using `colorous` scientific colormaps. |
-| `zscale.rs` | 46 | IRAF-style ZScale cut estimation. |
+| `main.rs` | ~190 | CLI parsing (`clap`), terminal setup, protocol detection/override, 5 ms-poll event loop, mouse-capture sync. |
+| `lib.rs` | 8 | Module declarations (exposes everything for the integration tests). |
+| `app.rs` | ~1060 | Central `App` state, `Action` dispatch, all per-mode key handlers, mouse handling, status messages. |
+| `keymap.rs` | ~370 | `Action` enum + `KEYMAP` table: single source of truth for normal-mode bindings; drives both dispatch and the generated help. |
+| `fits.rs` | ~520 | FITS parsing via `fitsrs`; ordered full-fidelity header (`FitsHeader`), pixel data as `Array2<f32>`, extension metadata. |
+| `render.rs` | ~260 | Background `RenderThread`: shared `viewport()` math, stretch+colormap, crosshair compositing, encode. |
+| `ui.rs` | ~730 | ratatui rendering: image area, status bar, side/bottom panels, full-screen pages (help, header viewer). |
+| `stretch.rs` | 135 | Linear / Logarithmic / Asinh stretch (rayon-parallel). |
+| `colormap.rs` | 136 | Maps `[0,1]` → RGBA using `colorous` scientific colormaps. |
+| `zscale.rs` | 225 | IRAF-style ZScale cut estimation. |
 
 ### `main.rs` — entry point
-- CLI flags: positional `file`, `--protocol`, `--ext`, `--disable-sixel-clear`
-  (also reads `RETROFITS_DISABLE_SIXEL_CLEAR`).
+- CLI flags: positional `file`, `--protocol`, `--ext`, `--mouse`.
 - Queries the terminal for graphics capability via `Picker::from_query_stdio()`.
 - **Default protocol**: Kitty when running under Ghostty (detected via
   `TERM_PROGRAM`/`TERM`), otherwise Halfblocks for maximum compatibility. An
   explicit `--protocol` overrides this.
 - Event loop (`run_app`) polls events every 5 ms, pulls finished frames from the
-  render thread, and only redraws when something changed. Honors
-  `clear_screen_next_frame` (the Sixel workaround) by calling `terminal.clear()`
-  before the next draw.
+  render thread, expires transient status messages, syncs terminal mouse
+  capture to `app.mouse_enabled`, and only redraws when something changed.
+  `clear_screen_next_frame` (set by the `R` key) forces a `terminal.clear()`
+  before the next draw as an artifact escape hatch.
+
+### `keymap.rs` — bindings as data
+- `Action` enum decouples what happens from which key triggers it.
+- `KEYMAP: &[Binding]` lists keys (+ modifiers), action, category, help text
+  and a `global` flag (allowed while the summary panel is open).
+- `lookup(KeyEvent)` resolves an event (SHIFT is stripped for `Char` keys and
+  matched exactly for arrows, enabling `Shift+Arrow` bindings).
+- The help page content is generated from this table, so help and actual
+  bindings cannot drift apart.
 
 ### `app.rs` — state & input
 - `App` struct holds: the `Arc<FitsImage>`, stretch/colormap, black/white points,
-  zoom + center (pan), terminal size, cut mode, the active `StatefulProtocol`,
-  the `RenderThread`, and assorted flags.
+  zoom + center (pan), terminal size + font size, cut mode, the active
+  `StatefulProtocol`, the `RenderThread`, transient `StatusMessage`, mouse
+  state, and the rects last drawn (for mouse hit-testing).
 - `InputMode` enum drives modal key handling: `Normal`, `EditingBlackPoint`,
   `EditingWhitePoint`, `Summary`, `Help { scroll }`,
-  `SelectingExtension { selected }`.
-- `CutMode`: `MinMax`, `ZScale`, `Custom`. `apply_cut_mode()` recomputes
-  black/white points and queues a render.
-- `queue_render()` / `queue_render_with_fits()` build a `RenderRequest` and hand
-  it to the render thread. `try_update_protocol()` swaps in the newest finished
-  frame.
-- Keyboard handlers per mode mirror the README shortcut table (pan, zoom,
-  cycle stretch/colormap/cut, protocol switching `p`/`H`/`S`/`K`/`I`, manual
-  cut entry `m`, summary `w`, help `h`, extension picker `e`, force redraw `R`).
+  `HeaderView { scroll, search }`, `SelectingExtension { state }`,
+  `SelectingProtocol { state }`, `Crosshair { pos }`.
+- Normal-mode keys dispatch through `keymap::lookup` → `App::dispatch(Action)`.
+  `close_mode()` centralizes returning to `Normal` (+ re-render).
+- `notify(Severity, text)` shows a vim-style transient status message
+  (Info 2.5 s, Warn/Error 5 s); consumed for bad input, extension load
+  failures, protocol switches, etc.
+- Vim-style navigation: `h/j/k/l`/arrows fine pan (1/8 view), `H/J/K/L`/
+  Shift+arrows coarse (1/2), zoom floor 0.1 (below 1x the image shrinks),
+  `Esc` never quits (only `q` does).
+- `handle_mouse()` (opt-in): scroll = zoom at cursor, drag = pan, click =
+  select/activate picker rows, drag in crosshair mode moves the crosshair.
 
 ### `fits.rs` — parsing
 - `load_fits(path, ext_arg)` returns a `FitsImage { header, data, width, height,
   extensions, current_extension, file_path }`.
+- `header` is a `FitsHeader(Vec<HeaderEntry>)`: **every card in file order**,
+  preserving values, per-card comments, `COMMENT`/`HISTORY` cards and blank
+  lines; long-string `CONTINUE` cards are merged. `FitsHeader::get(kw)` does a
+  linear lookup.
+- `extensions: Vec<ExtensionInfo>` carries index, `EXTNAME`, image flag,
+  HDU kind (IMAGE/BINTABLE/TABLE), NAXIS dims and pixel type for the picker.
 - Iterates **all HDUs once** to build the `extensions` list and choose a target
   (by index, by `EXTNAME`, or the first image HDU), then **reopens the file** to
   read the chosen HDU's pixels (the iterator was consumed).
 - Normalizes every BITPIX type (`U8/I16/I32/I64/F32/F64`) to `f32`, applying
   `BZERO`/`BSCALE` if present.
 - **Flips rows vertically** because FITS stores bottom-to-top while we render
-  top-to-bottom.
+  top-to-bottom (pinned by a test against astropy reference pixel values).
 - Inline unit tests load `example_fits/18109J000.fits`.
 
 ### `render.rs` — background rendering
 - `RenderThread` spawns a worker fed by an MPSC channel. It **debounces** input
   by draining the queue to the latest `RenderRequest` before working — important
-  for responsiveness under rapid key presses.
-- `process_frame()` computes the visible crop from zoom/pan/center and terminal
-  font size, slices the `ndarray`, runs `compute_stretch` + `apply_colormap`,
-  then encodes via `picker.new_resize_protocol()`.
+  for responsiveness under rapid key presses. A fits swap carried by a drained
+  request is still applied.
+- `viewport()` computes the visible crop from zoom/center/terminal geometry;
+  it is shared with `app.rs` (crosshair positioning, mouse hit-testing) so the
+  two can never disagree.
+- `process_frame()` slices the `ndarray`, runs `compute_stretch` +
+  `apply_colormap`, composites the crosshair into the RGBA if active (per-axis,
+  protocol-aware thickness), then encodes via `picker.new_resize_protocol()`.
+
+### `ui.rs` — layout
+- **Panels never overlay the image** (that was the root cause of the old
+  Kitty/Sixel artifacts; see DEVELOP.md). Help and the header viewer are
+  full-screen pages; summary/extension/protocol pickers are a right side
+  panel; manual cut entry is a bottom strip. The image rect shrinks and the
+  size change triggers a natural re-encode.
+- Below 1x zoom the image is drawn into a centered sub-rect scaled by zoom.
+- Status bar: three segments (file/ext/dims | zoom·stretch·colormap·cuts |
+  protocol + hints); the middle segment is replaced by the crosshair readout
+  or a transient severity-colored message when active.
+- The header viewer (`v`) is a `less`-style page: scrolling, `/` incremental
+  search with highlighted matches, `n`/`N` navigation.
 
 ### `stretch.rs`, `colormap.rs`, `zscale.rs`
 - `stretch.rs`: normalizes to `[0,1]`, clamps, then applies the chosen curve
@@ -152,9 +191,9 @@ up the CLI, terminal, protocol detection, and the event loop.
 
 - `README.md` — features, install, usage, full keyboard-shortcut table.
 - `INSTALL.md` — build/prereqs (incl. `libchafa`) and an AI-agent quick start.
-- `DEVELOP.md` — write-ups of the **Kitty** and **Sixel** popup-artifact bugs
-  and their fixes (forced `queue_render()` on popup close; `clear_screen_next_frame`
-  flag for Sixel, toggleable via `--disable-sixel-clear`).
+- `DEVELOP.md` — the non-overlapping panel layout rationale, plus historical
+  write-ups of the **Kitty** and **Sixel** popup-artifact bugs that the layout
+  made obsolete.
 - `MAINTAINER.md` — release process.
 - `references/retrofits_prd.md` — original PRD / design rationale.
 
@@ -164,22 +203,26 @@ up the CLI, terminal, protocol detection, and the event loop.
 
 - **Phase 1 (done):** core rendering, interactivity, protocols, stretch,
   colormaps, multi-extension handling.
+- **UI overhaul (done):** keymap-as-data, non-overlapping panels (workarounds
+  removed), header viewer with search, extension picker polish, vim-style
+  keys, zoom-out below fit, status messages, crosshair pixel readout,
+  opt-in mouse support.
 - **Phase 2 (deferred, not implemented):** WCS astrometry — real-time RA/Dec
   readout in the status bar from FITS WCS headers (`CRPIX`/`CRVAL`/`CDELT`/`CTYPE`).
+  The crosshair readout is the natural surface for this.
 
 ---
 
 ## Caveats / known rough edges
 
-- **`fits.rs` duplication:** the `Primary` and `XImage` HDU arms are ~130
-  near-identical lines each (header extraction, pixel decode, row-flip). A shared
-  helper would roughly halve the file.
 - **"Zero-copy memmap" not realized:** the PRD describes a memory-mapped,
   zero-copy architecture, but the implementation reads pixels into an owned
   `Vec<f32>` through a `BufReader`. `memmap2` is a dependency but unused in the
   data path.
-- **Protocol popup artifacts:** Kitty and Sixel both need explicit redraw
-  workarounds (documented in `DEVELOP.md`); behavior can vary by terminal
-  emulator.
+- **No extension caching:** switching extensions re-reads the file from disk
+  each time (deliberate — a 4k×4k f32 frame is ~64 MB of RAM per cached entry).
 - **Non-contiguous colormap views** hit `unimplemented!` — fine in practice
   because the viewport slice is materialized contiguous, but a latent panic.
+- **3D+ image HDUs** are listed as viewable but fail to load (pixel-count
+  mismatch); the failure now surfaces as a status-bar error rather than
+  silently doing nothing.

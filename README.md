@@ -22,7 +22,11 @@ RetroFITS is designed to work with modern terminal emulators, utilizing memory-m
 
 - High-performance FITS viewing directly in the terminal
 - Support for various rendering protocols (Kitty, iTerm2, Sixel, Halfblocks)
-- Interactive exploration (zoom, pan, adjust scaling)
+- Interactive exploration (zoom in/out, pan, adjust scaling) with vim-style keys
+- Full FITS header viewer with incremental search (`v`, then `/` like `less`)
+- Multi-extension files: extension picker with dimensions and pixel types (`e`)
+- Crosshair pixel readout: FITS coordinates and value under the cursor (`x`)
+- Optional mouse support: scroll to zoom, drag to pan (`--mouse` or `M`)
 - Remote SSH support
 
 ## Installation

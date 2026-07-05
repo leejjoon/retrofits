@@ -1,8 +1,32 @@
 # Development Notes
 
-## Known Issues and Fixes
+## UI layout and terminal graphics protocols
 
-### Kitty Protocol Popup Window Rendering Bug
+Popups/panels are **never overlaid on the image region**. Overlaying a
+ratatui `Clear` widget on cells occupied by a terminal graphics protocol
+(Kitty/Sixel) leaves stale pixels when the popup closes, because the
+protocols emit image data out-of-band from ratatui's cell model. Instead:
+
+- Help and the FITS header viewer are full-screen pages (the image widget is
+  simply not drawn while they are open).
+- The summary, extension picker, and protocol picker are right-hand side
+  panels; the manual cut entry is a bottom strip. The image rect shrinks, and
+  the resize is detected in `ui::draw`, triggering a natural re-encode.
+
+This removed the two historical per-protocol workarounds documented below.
+The `R` key remains as a manual force-clear escape hatch, and the crosshair
+is composited into the rendered RGBA (in the render thread) rather than drawn
+over terminal cells for the same reason.
+
+## Historical issues (fixed by the panel layout above)
+
+The following two workarounds existed while popups were still drawn as
+overlays on top of the image. They were removed (along with the
+`--disable-sixel-clear` flag and `RETROFITS_DISABLE_SIXEL_CLEAR` env var)
+when the non-overlapping layout landed; the write-ups are kept because they
+document real terminal-emulator behavior worth remembering.
+
+### Kitty Protocol Popup Window Rendering Bug (historical)
 
 **Issue:**
 When running the application with the Kitty protocol, opening and then closing a popup window (such as the Summary, Help, or Manual Cut Entry window) would result in the popup window partially remaining on the screen. The background image was not fully restored. However, if the color map was changed while the popup was open, the image would be fully restored upon closing the popup.
@@ -15,7 +39,7 @@ Changing the color while the popup was open triggered an explicit call to `self.
 **Fix:**
 To resolve this, explicit calls to `self.queue_render()` were added in `src/app.rs` within the key handlers (`handle_summary_key`, `handle_help_key`, and `handle_input_key`) when the `InputMode` state is changed back to `Normal`. This ensures that every time a popup window is closed, a new render request is queued, forcing the image to be fully redrawn on the terminal and overwriting the stale cleared cells.
 
-### Sixel Protocol Popup Caching Artifacts
+### Sixel Protocol Popup Caching Artifacts (historical)
 
 **Issue:**
 When running the application with the Sixel protocol, opening and closing a popup window results in artifacts of the popup remaining on the screen, similar to the Kitty protocol bug but with different underlying mechanics. Changing the window size or cut mode makes the artifacts disappear.
