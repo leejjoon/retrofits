@@ -44,6 +44,34 @@ pub struct StatusMessage {
     pub expires: std::time::Instant,
 }
 
+/// Next selectable (image) extension index in the given direction, starting
+/// from `from` (exclusive), skipping non-image HDUs. Returns `from` if there
+/// is no further image extension in that direction.
+pub fn next_image_extension(
+    exts: &[crate::fits::ExtensionInfo],
+    from: usize,
+    forward: bool,
+) -> usize {
+    let mut i = from;
+    loop {
+        let next = if forward {
+            if i + 1 >= exts.len() {
+                return from;
+            }
+            i + 1
+        } else {
+            if i == 0 {
+                return from;
+            }
+            i - 1
+        };
+        if exts[next].is_image {
+            return next;
+        }
+        i = next;
+    }
+}
+
 /// Human-readable protocol name, shared by the status bar and summary.
 pub fn protocol_name(p: ProtocolType) -> &'static str {
     match p {
@@ -396,17 +424,15 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('e') => {
                 self.close_mode();
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                let forward = matches!(key.code, KeyCode::Down | KeyCode::Char('j'));
+                let current = match &self.input_mode {
+                    InputMode::SelectingExtension { state } => state.selected().unwrap_or(0),
+                    _ => return,
+                };
+                let next = next_image_extension(&self.fits.extensions, current, forward);
                 if let InputMode::SelectingExtension { state } = &mut self.input_mode {
-                    let i = state.selected().unwrap_or(0);
-                    state.select(Some(i.saturating_sub(1)));
-                }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let last = self.fits.extensions.len().saturating_sub(1);
-                if let InputMode::SelectingExtension { state } = &mut self.input_mode {
-                    let i = state.selected().unwrap_or(0);
-                    state.select(Some((i + 1).min(last)));
+                    state.select(Some(next));
                 }
             }
             KeyCode::Enter => {
@@ -415,22 +441,45 @@ impl App {
                     _ => return,
                 };
                 let ext_info = self.fits.extensions.get(selected).cloned();
-                if let Some(ext_info) = ext_info {
-                    if ext_info.is_image {
-                        if let Ok(new_fits) = crate::fits::load_fits(
-                            &self.fits.file_path,
-                            Some(&ext_info.index.to_string()),
-                        ) {
-                            self.fits = Arc::new(new_fits);
-                            self.zoom = 1.0;
-                            self.center =
-                                (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
-                            self.compute_cuts();
-                            self.queue_render_with_fits();
-                        }
+                let Some(ext_info) = ext_info else {
+                    self.close_mode();
+                    return;
+                };
+                if !ext_info.is_image {
+                    // Stay in the picker; tables cannot be displayed.
+                    self.notify(
+                        Severity::Warn,
+                        format!("Extension {} is not an image", ext_info.index),
+                    );
+                    return;
+                }
+                match crate::fits::load_fits(
+                    &self.fits.file_path,
+                    Some(&ext_info.index.to_string()),
+                ) {
+                    Ok(new_fits) => {
+                        self.fits = Arc::new(new_fits);
+                        self.zoom = 1.0;
+                        self.center =
+                            (self.fits.width as f64 / 2.0, self.fits.height as f64 / 2.0);
+                        self.compute_cuts();
+                        self.queue_render_with_fits();
+                        let label = if ext_info.name.is_empty() {
+                            format!("extension {}", ext_info.index)
+                        } else {
+                            format!("extension {} [{}]", ext_info.index, ext_info.name)
+                        };
+                        self.notify(Severity::Info, format!("Loaded {}", label));
+                        self.close_mode();
+                    }
+                    Err(e) => {
+                        // Stay in the picker so the user can retry or cancel.
+                        self.notify(
+                            Severity::Error,
+                            format!("Failed to load extension {}: {:#}", ext_info.index, e),
+                        );
                     }
                 }
-                self.close_mode();
             }
             _ => {}
         }
@@ -630,5 +679,46 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_image_extension;
+    use crate::fits::{ExtensionInfo, HduKind};
+
+    fn ext(index: usize, is_image: bool) -> ExtensionInfo {
+        ExtensionInfo {
+            index,
+            name: String::new(),
+            is_image,
+            kind: if is_image {
+                HduKind::Image
+            } else {
+                HduKind::BinaryTable
+            },
+            dims: Vec::new(),
+            bitpix: None,
+        }
+    }
+
+    #[test]
+    fn test_next_image_extension_skips_tables() {
+        // [Image, Table, Image, Table]
+        let exts = vec![ext(0, true), ext(1, false), ext(2, true), ext(3, false)];
+        // Forward from 0 skips the table and lands on 2.
+        assert_eq!(next_image_extension(&exts, 0, true), 2);
+        // Forward from 2: only a table remains -> stay.
+        assert_eq!(next_image_extension(&exts, 2, true), 2);
+        // Backward from 2 skips the table and lands on 0.
+        assert_eq!(next_image_extension(&exts, 2, false), 0);
+        // Backward from 0: nothing before -> stay.
+        assert_eq!(next_image_extension(&exts, 0, false), 0);
+    }
+
+    #[test]
+    fn test_next_image_extension_all_tables() {
+        let exts = vec![ext(0, true), ext(1, false), ext(2, false)];
+        assert_eq!(next_image_extension(&exts, 0, true), 0);
     }
 }

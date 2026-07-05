@@ -11,11 +11,64 @@ use std::path::Path;
 
 use fitsrs::{Fits, Pixels, HDU};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HduKind {
+    Image,
+    BinaryTable,
+    AsciiTable,
+}
+
+impl std::fmt::Display for HduKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Image => write!(f, "IMAGE"),
+            Self::BinaryTable => write!(f, "BINTABLE"),
+            Self::AsciiTable => write!(f, "TABLE"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExtensionInfo {
     pub index: usize,
     pub name: String,
     pub is_image: bool,
+    pub kind: HduKind,
+    /// NAXIS dimensions (empty for tables).
+    pub dims: Vec<usize>,
+    /// Pixel type (e.g. "i16", "f32"); images only.
+    pub bitpix: Option<String>,
+}
+
+impl ExtensionInfo {
+    /// Short human-readable description for the extension picker.
+    pub fn describe(&self) -> String {
+        if self.is_image {
+            let dims = self
+                .dims
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("\u{d7}");
+            format!("{} {}", dims, self.bitpix.as_deref().unwrap_or(""))
+        } else {
+            "(not viewable)".to_string()
+        }
+    }
+}
+
+/// Structural description of an HDU for the extension list.
+fn describe_hdu(hdu: &HDU) -> (HduKind, Vec<usize>, Option<String>) {
+    match hdu {
+        HDU::Primary(img) | HDU::XImage(img) => {
+            let x = img.get_header().get_xtension();
+            let dims: Vec<usize> = x.get_naxis().iter().map(|&d| d as usize).collect();
+            let bitpix = Some(format!("{:?}", x.get_bitpix()).to_lowercase());
+            (HduKind::Image, dims, bitpix)
+        }
+        HDU::XBinaryTable(_) => (HduKind::BinaryTable, Vec::new(), None),
+        HDU::XASCIITable(_) => (HduKind::AsciiTable, Vec::new(), None),
+    }
 }
 
 /// A single FITS header card, order-preserving and comment-preserving.
@@ -187,11 +240,15 @@ pub fn load_fits(path: &Path, ext_arg: Option<&str>) -> Result<FitsImage> {
         let hdu = hdu_result.with_context(|| format!("Failed to parse HDU {}", i))?;
         let is_image = is_image_hdu(&hdu);
         let name = ext_name_from_hdu(&hdu);
+        let (kind, dims, bitpix) = describe_hdu(&hdu);
 
         extensions.push(ExtensionInfo {
             index: i,
             name: name.clone(),
             is_image,
+            kind,
+            dims,
+            bitpix,
         });
 
         if target_hdu.is_none() {

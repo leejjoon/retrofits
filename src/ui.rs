@@ -370,17 +370,19 @@ fn draw_extension_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 Style::default()
             };
 
+            let marker = if i == current { "\u{25cf}" } else { " " };
             let name = if ext.name.is_empty() {
-                " ".to_string()
+                String::new()
             } else {
                 format!(" [{}]", ext.name)
             };
-
             let item_text = format!(
-                "{:>3}: {:<11} {}",
+                "{}{:>2} {:<8}{} {}",
+                marker,
                 i,
-                if ext.is_image { "Image" } else { "Table/Other" },
-                name
+                ext.kind.to_string(),
+                name,
+                ext.describe()
             );
             ListItem::new(Line::from(Span::styled(item_text, style)))
         })
