@@ -124,7 +124,7 @@ fn test_keymap_dispatch_matches_keys() {
         lookup(key(KeyCode::Char('s'))).unwrap().action,
         Action::CycleStretch
     );
-    assert!(lookup(key(KeyCode::Char('x'))).is_none());
+    assert!(lookup(key(KeyCode::Char('y'))).is_none());
 
     // Dispatch through the App: 's' cycles stretch.
     let mut app = test_app();
@@ -234,6 +234,35 @@ fn test_zoom_out_below_one() {
     // Reset restores 1.0.
     app.handle_key(key(KeyCode::Char('r')));
     assert_eq!(app.zoom, 1.0);
+}
+
+#[test]
+fn test_crosshair_mode() {
+    use crossterm::event::KeyCode;
+    use retrofits::app::InputMode;
+
+    let mut app = test_app();
+    app.handle_key(key(KeyCode::Char('x')));
+    let start = match &app.input_mode {
+        InputMode::Crosshair { pos } => *pos,
+        other => panic!("x should enter crosshair mode, got {:?}", other),
+    };
+    // Starts at the center of the visible area, inside the image.
+    assert!(start.0 < app.fits.width && start.1 < app.fits.height);
+
+    // h moves left by at least one pixel, clamped to the image.
+    app.handle_key(key(KeyCode::Char('h')));
+    let after = match &app.input_mode {
+        InputMode::Crosshair { pos } => *pos,
+        _ => unreachable!(),
+    };
+    assert!(after.0 < start.0);
+    assert_eq!(after.1, start.1);
+
+    // x exits back to normal mode.
+    app.handle_key(key(KeyCode::Char('x')));
+    assert!(matches!(app.input_mode, InputMode::Normal));
+    assert!(app.running);
 }
 
 #[test]

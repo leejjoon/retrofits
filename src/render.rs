@@ -22,6 +22,76 @@ pub struct RenderRequest {
     pub term_size: (u16, u16),
     pub protocol_type: ratatui_image::picker::ProtocolType,
     pub new_fits: Option<Arc<FitsImage>>,
+    /// Crosshair position in image pixel coordinates (row-flipped screen
+    /// orientation). Drawn into the rendered RGBA so it works identically
+    /// on every graphics protocol without overlaying terminal cells.
+    pub crosshair: Option<(usize, usize)>,
+}
+
+/// The visible part of the image in image pixel coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewRect {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+/// Compute the visible crop of an `img_w` x `img_h` image for the given
+/// zoom/center and terminal geometry. Shared by the render thread and by
+/// crosshair/mouse hit-testing so the two can never disagree.
+pub fn viewport(
+    img_w: usize,
+    img_h: usize,
+    zoom: f64,
+    center: (f64, f64),
+    term_size: (u16, u16),
+    font_size: (u16, u16),
+) -> ViewRect {
+    let (img_w_f, img_h_f) = (img_w as f64, img_h as f64);
+
+    // Fallback if font size is 0
+    let font_w = if font_size.0 > 0 {
+        font_size.0 as f64
+    } else {
+        10.0
+    };
+    let font_h = if font_size.1 > 0 {
+        font_size.1 as f64
+    } else {
+        20.0
+    };
+
+    let term_phys_w = (term_size.0 as f64 * font_w).max(1.0);
+    let term_phys_h = (term_size.1 as f64 * font_h).max(1.0);
+
+    let scale_to_fit = (term_phys_w / img_w_f).min(term_phys_h / img_h_f);
+    let scale_factor = scale_to_fit * zoom;
+
+    // Determine rect size in FITS original pixels
+    let crop_w = ((term_phys_w / scale_factor).min(img_w_f) as usize).max(1);
+    let crop_h = ((term_phys_h / scale_factor).min(img_h_f) as usize).max(1);
+
+    // We want the viewport centered on `center`.
+    let start_x = center.0 - (crop_w as f64 / 2.0);
+    let start_y = center.1 - (crop_h as f64 / 2.0);
+
+    let max_x = img_w.saturating_sub(crop_w) as f64;
+    let max_y = img_h.saturating_sub(crop_h) as f64;
+
+    // Clamp start coordinates safely inside image bounds
+    let start_x = start_x.clamp(0.0, max_x.max(0.0));
+    let start_y = start_y.clamp(0.0, max_y.max(0.0));
+
+    let x = start_x.round() as usize;
+    let y = start_y.round() as usize;
+
+    ViewRect {
+        x,
+        y,
+        width: (x + crop_w).min(img_w) - x,
+        height: (y + crop_h).min(img_h) - y,
+    }
 }
 
 /// The response from the render thread containing the processed protocol state.
@@ -97,49 +167,94 @@ fn process_frame(fits: &FitsImage, picker: &mut Picker, req: RenderRequest) -> S
     picker.set_protocol_type(req.protocol_type);
 
     // 1. Compute viewport based on terminal layout
-    let (img_w, img_h) = (fits.width as f64, fits.height as f64);
-    let (font_w, font_h) = picker.font_size();
-
-    // Fallback if font size is 0
-    let font_w = if font_w > 0 { font_w as f64 } else { 10.0 };
-    let font_h = if font_h > 0 { font_h as f64 } else { 20.0 };
-
-    let term_phys_w = (req.term_size.0 as f64 * font_w).max(1.0);
-    let term_phys_h = (req.term_size.1 as f64 * font_h).max(1.0);
-
-    let scale_to_fit = (term_phys_w / img_w).min(term_phys_h / img_h);
-    let scale_factor = scale_to_fit * req.zoom;
-
-    // Determine rect size in FITS original pixels
-    let crop_w = ((term_phys_w / scale_factor).min(img_w) as usize).max(1);
-    let crop_h = ((term_phys_h / scale_factor).min(img_h) as usize).max(1);
-
-    // We want the viewport centered on `req.center`.
-    let start_x = req.center.0 - (crop_w as f64 / 2.0);
-    let start_y = req.center.1 - (crop_h as f64 / 2.0);
-
-    let max_x = fits.width.saturating_sub(crop_w) as f64;
-    let max_y = fits.height.saturating_sub(crop_h) as f64;
-
-    // Clamp start coordinates safely inside image bounds
-    let start_x = start_x.clamp(0.0, max_x.max(0.0));
-    let start_y = start_y.clamp(0.0, max_y.max(0.0));
-
-    let x = start_x.round() as usize;
-    let y = start_y.round() as usize;
-
-    let x_end = (x + crop_w).min(fits.width);
-    let y_end = (y + crop_h).min(fits.height);
+    let vr = viewport(
+        fits.width,
+        fits.height,
+        req.zoom,
+        req.center,
+        req.term_size,
+        picker.font_size(),
+    );
 
     // 2. Extract viewport
     use ndarray::s;
-    let viewport_data = fits.data.slice(s![y..y_end, x..x_end]);
+    let viewport_data = fits
+        .data
+        .slice(s![vr.y..vr.y + vr.height, vr.x..vr.x + vr.width]);
 
     // 3. Stretch & Colormap
     let stretched = compute_stretch(viewport_data, req.stretch, req.black_point, req.white_point);
-    let rgba = apply_colormap(stretched.view(), req.colormap);
+    let mut rgba = apply_colormap(stretched.view(), req.colormap);
+
+    // 3b. Composite the crosshair into the RGBA (protocol-agnostic overlay).
+    if let Some((cx, cy)) = req.crosshair {
+        draw_crosshair(
+            &mut rgba,
+            &vr,
+            cx,
+            cy,
+            req.term_size,
+            picker.font_size(),
+            req.protocol_type,
+        );
+    }
     let dyn_img = DynamicImage::ImageRgba8(rgba);
 
     // 4. Encode (time-consuming part blocking the ratatui-image Picker)
     picker.new_resize_protocol(dyn_img)
+}
+
+/// Draw crosshair lines through image pixel (cx, cy) into the cropped RGBA.
+///
+/// Thickness is computed per axis so the line survives the downscale to the
+/// terminal: pixel protocols aim for ~2 screen pixels; Halfblocks has only
+/// 1x2 samples per character cell, so the line must cover about one sample
+/// (a full column / half a row of a cell) to remain visible.
+#[allow(clippy::too_many_arguments)]
+fn draw_crosshair(
+    rgba: &mut image::RgbaImage,
+    vr: &ViewRect,
+    cx: usize,
+    cy: usize,
+    term_size: (u16, u16),
+    font_size: (u16, u16),
+    protocol_type: ratatui_image::picker::ProtocolType,
+) {
+    if cx < vr.x || cx >= vr.x + vr.width || cy < vr.y || cy >= vr.y + vr.height {
+        return;
+    }
+    let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+    let cols = term_size.0.max(1) as f64;
+    let rows = term_size.1.max(1) as f64;
+
+    let (thick_x, thick_y) = if protocol_type == ratatui_image::picker::ProtocolType::Halfblocks {
+        // One terminal sample: a cell column horizontally, half a cell row
+        // vertically.
+        ((w as f64 / cols).ceil(), (h as f64 / (rows * 2.0)).ceil())
+    } else {
+        // ~2 screen pixels at the displayed scale.
+        let font_w = if font_size.0 > 0 { font_size.0 } else { 10 } as f64;
+        let font_h = if font_size.1 > 0 { font_size.1 } else { 20 } as f64;
+        let fit = ((cols * font_w) / w as f64).min((rows * font_h) / h as f64);
+        let t = (2.0 / fit.min(1.0)).ceil();
+        (t, t)
+    };
+    let thick_x = (thick_x as usize).max(1);
+    let thick_y = (thick_y as usize).max(1);
+
+    let color = image::Rgba([255u8, 80, 80, 255]);
+    let lx = cx - vr.x;
+    let ly = cy - vr.y;
+    // Vertical line
+    for x in lx.saturating_sub(thick_x / 2)..(lx + thick_x.div_ceil(2)).min(w) {
+        for y in 0..h {
+            rgba.put_pixel(x as u32, y as u32, color);
+        }
+    }
+    // Horizontal line
+    for y in ly.saturating_sub(thick_y / 2)..(ly + thick_y.div_ceil(2)).min(h) {
+        for x in 0..w {
+            rgba.put_pixel(x as u32, y as u32, color);
+        }
+    }
 }

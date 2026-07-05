@@ -29,6 +29,7 @@ fn test_render_thread() {
         term_size: (80, 24),
         protocol_type: ratatui_image::picker::ProtocolType::Halfblocks,
         new_fits: None,
+        crosshair: None,
     };
 
     render_thread.request(req);

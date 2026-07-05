@@ -117,6 +117,9 @@ pub enum InputMode {
     HeaderView { scroll: usize, search: HeaderSearch },
     SelectingExtension { state: ListState },
     SelectingProtocol { state: ListState },
+    /// Pixel-readout crosshair; position in image pixel coordinates
+    /// (row-flipped screen orientation, 0-based).
+    Crosshair { pos: (usize, usize) },
 }
 
 pub struct App {
@@ -138,6 +141,8 @@ pub struct App {
     pub protocol: StatefulProtocol,
     pub protocol_type: ProtocolType,
     pub guessed_protocol: ProtocolType,
+    /// Terminal cell size in pixels, from the protocol query.
+    pub font_size: (u16, u16),
     pub render_thread: RenderThread,
     pub running: bool,
     /// One-shot flag: force a full terminal clear before the next draw.
@@ -164,6 +169,7 @@ impl App {
         let dyn_img = DynamicImage::ImageRgba8(rgba);
         let protocol = picker.new_resize_protocol(dyn_img);
         let protocol_type = picker.protocol_type();
+        let font_size = picker.font_size();
 
         let render_thread = RenderThread::new(fits.clone(), picker.clone());
 
@@ -186,6 +192,7 @@ impl App {
             protocol,
             protocol_type,
             guessed_protocol,
+            font_size,
             render_thread,
             running: true,
             clear_screen_next_frame: false,
@@ -239,7 +246,23 @@ impl App {
             term_size: self.term_size,
             protocol_type: self.protocol_type,
             new_fits,
+            crosshair: match &self.input_mode {
+                InputMode::Crosshair { pos } => Some(*pos),
+                _ => None,
+            },
         }
+    }
+
+    /// The currently visible part of the image, in image pixel coordinates.
+    pub fn visible_rect(&self) -> crate::render::ViewRect {
+        crate::render::viewport(
+            self.fits.width,
+            self.fits.height,
+            self.zoom.max(1.0),
+            self.center,
+            self.term_size,
+            self.font_size,
+        )
     }
 
     pub fn queue_render(&mut self) {
@@ -309,6 +332,76 @@ impl App {
             InputMode::HeaderView { .. } => self.handle_header_key(key),
             InputMode::SelectingExtension { .. } => self.handle_extension_key(key),
             InputMode::SelectingProtocol { .. } => self.handle_protocol_key(key),
+            InputMode::Crosshair { .. } => self.handle_crosshair_key(key),
+        }
+    }
+
+    fn handle_crosshair_key(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyModifiers;
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('x') => {
+                // close_mode queues a render without the crosshair, erasing it.
+                self.close_mode();
+                return;
+            }
+            _ => {}
+        }
+
+        // One keypress moves the crosshair by about one terminal cell
+        // (coarse: 10 cells), expressed in image pixels.
+        let vr = self.visible_rect();
+        let cell_x = (vr.width as f64 / self.term_size.0.max(1) as f64).max(1.0) as usize;
+        let cell_y = (vr.height as f64 / self.term_size.1.max(1) as f64).max(1.0) as usize;
+        let coarse = key.modifiers.contains(KeyModifiers::SHIFT)
+            || matches!(
+                key.code,
+                KeyCode::Char('H') | KeyCode::Char('J') | KeyCode::Char('K') | KeyCode::Char('L')
+            );
+        let (dx, dy) = {
+            let f = if coarse { 10 } else { 1 };
+            (cell_x * f, cell_y * f)
+        };
+
+        let (max_x, max_y) = (self.fits.width - 1, self.fits.height - 1);
+        let mut moved = false;
+        if let InputMode::Crosshair { pos } = &mut self.input_mode {
+            let (x, y) = *pos;
+            let new = match key.code {
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
+                    (x.saturating_sub(dx), y)
+                }
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
+                    ((x + dx).min(max_x), y)
+                }
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+                    (x, y.saturating_sub(dy))
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+                    (x, (y + dy).min(max_y))
+                }
+                _ => (x, y),
+            };
+            if new != *pos {
+                *pos = new;
+                moved = true;
+            }
+        }
+        if moved {
+            // Keep the crosshair visible: pan the view if it left the crop.
+            let pos = match &self.input_mode {
+                InputMode::Crosshair { pos } => *pos,
+                _ => return,
+            };
+            let vr = self.visible_rect();
+            if pos.0 < vr.x
+                || pos.0 >= vr.x + vr.width
+                || pos.1 < vr.y
+                || pos.1 >= vr.y + vr.height
+            {
+                self.center = (pos.0 as f64, pos.1 as f64);
+            }
+            self.queue_render();
         }
     }
 
@@ -440,6 +533,13 @@ impl App {
                 self.input_mode = InputMode::SelectingProtocol {
                     state: ListState::default().with_selected(Some(current)),
                 };
+            }
+            Action::ToggleCrosshair => {
+                // Start at the center of the visible area.
+                let vr = self.visible_rect();
+                let pos = (vr.x + vr.width / 2, vr.y + vr.height / 2);
+                self.input_mode = InputMode::Crosshair { pos };
+                self.queue_render();
             }
         }
     }

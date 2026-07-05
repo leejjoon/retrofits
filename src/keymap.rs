@@ -35,6 +35,7 @@ pub enum Action {
     CycleProtocol,
     OpenProtocolPicker,
     SetProtocol(ProtocolType),
+    ToggleCrosshair,
 }
 
 pub struct Binding {
@@ -239,6 +240,14 @@ pub static KEYMAP: &[Binding] = &[
         action: Action::OpenManualCut,
         category: "Image Controls",
         help: "Set custom cut points (manual)",
+        global: false,
+    },
+    Binding {
+        keys: &[KeyCode::Char('x')],
+        mods: KeyModifiers::NONE,
+        action: Action::ToggleCrosshair,
+        category: "Image Controls",
+        help: "Crosshair pixel readout (move with h/j/k/l)",
         global: false,
     },
     // App controls

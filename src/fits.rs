@@ -484,6 +484,20 @@ mod tests {
     }
 
     #[test]
+    fn test_pixel_values_match_astropy() {
+        // Reference values read with astropy (data in file order, where row 0
+        // is the FITS bottom row): d[200,100] == 39.0, d[1024,512] == 99.0.
+        // Our loader flips rows top-to-bottom, so file row r maps to
+        // data[[height-1-r, c]]. This pins down the flip and the crosshair
+        // readout convention (FITS x = col+1, FITS y = height-row).
+        let img = load_fits(&example_fits_path(), None).unwrap();
+        assert_eq!(img.width, 2056);
+        assert_eq!(img.height, 2048);
+        assert_eq!(img.data[[img.height - 1 - 200, 100]], 39.0);
+        assert_eq!(img.data[[img.height - 1 - 1024, 512]], 99.0);
+    }
+
+    #[test]
     fn test_invalid_path() {
         let result = load_fits(Path::new("/nonexistent/file.fits"), None);
         assert!(result.is_err());

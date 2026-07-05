@@ -579,9 +579,22 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         filename, ext_str, app.fits.width, app.fits.height
     );
 
-    // Middle segment: viewport / display state, or a live message.
-    let (middle, middle_style) = match &app.message {
-        Some(msg) => {
+    // Middle segment: crosshair readout, a live message, or display state.
+    let (middle, middle_style) = match (&app.input_mode, &app.message) {
+        (InputMode::Crosshair { pos }, _) => {
+            // FITS convention: 1-based, bottom-up (rows were flipped at load).
+            let fits_x = pos.0 + 1;
+            let fits_y = app.fits.height - pos.1;
+            let value = app.fits.data[[pos.1, pos.0]];
+            (
+                format!(
+                    " (x={}, y={})  value={:.6e}   h/j/k/l:move  x/Esc:exit ",
+                    fits_x, fits_y, value
+                ),
+                base.fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            )
+        }
+        (_, Some(msg)) => {
             let style = match msg.severity {
                 Severity::Info => base.add_modifier(Modifier::BOLD),
                 Severity::Warn => base.fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -592,7 +605,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             };
             (format!(" {} ", msg.text), style)
         }
-        None => (
+        (_, None) => (
             format!(
                 " {:.2}x  {}  {}  {}[{},{}] ",
                 app.zoom,
